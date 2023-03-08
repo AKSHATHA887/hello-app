@@ -1,0 +1,35 @@
+parameters: 
+- name: dockerImgTag
+  type: string
+- name: dockerRegistry  # Name of the registry integration in Aqua
+  type: string
+- name: armClientId
+  type: string
+- name: armTenantId
+  type: string
+- name: databricksAzureClientSecret
+  type: string
+- name: armSubscriptionId
+  type: string
+
+steps:
+- task: PowerShell@2
+  displayName: 'Docker login'
+  inputs:
+    targetType: 'inline'
+    script: |
+      Write-Host "[Debug] dockerImgTag is ${{ parameters.dockerImgTag }}"
+      Write-Host "[Debug] dockerRegistry is ${{ parameters.dockerRegistry }}"
+      Write-Host "[Debug] armClientId is ${{ parameters.armClientId }}"
+      Write-Host "[Debug] armTenantId is ${{ parameters.armTenantId }}"
+      Write-Host "[Debug] armSubscriptionId is ${{ parameters.armSubscriptionId }}"
+      
+      az login --service-principal --username "${{ parameters.armClientId }}" --tenant "${{ parameters.armTenantId }}" --password "${{ parameters.databricksAzureClientSecret }}"
+      az account set --subscription="${{ parameters.armSubscriptionId }}"
+      az acr login --name "${{ parameters.dockerRegistry }}"
+  enabled: true
+
+# Pull our image from ACR
+- script: docker pull ${{ parameters.dockerImgTag }}
+  displayName: 'Pull ${{ parameters.dockerImgTag }} image'
+  enabled: true

@@ -1,0 +1,17 @@
+parameters:
+- name: VMIMAGE  # defaults for any parameters that aren't specified
+  default: ''
+
+stages:
+- stage: functional_validation_checks
+  displayName: Functional Quality Checks
+  dependsOn: []
+  jobs: 
+  - job: functional_checks
+    displayName: Functional Checks
+    steps: 
+      - bash: |
+            echo -e "Functional Check Validation"
+        displayName: 'Functional Check Message'
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}

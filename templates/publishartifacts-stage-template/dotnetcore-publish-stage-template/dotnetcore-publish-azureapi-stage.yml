@@ -1,0 +1,32 @@
+parameters:
+- name : DOTNETSDKVERSION
+  default: ''
+- name: CONFIGURATION
+  default: ''
+- name: SOURCE_ARTIFACT
+  default: ''
+- name: WEBAPIS
+  default: 'No'
+- name: nuGetServiceConnectionName
+  default: ''  
+
+stages: 
+- stage: build_and_publish
+  displayName: Build and Publish Artifacts
+  jobs:
+  - job: build_package_publish
+    displayName: Build and Publish Artifacts
+    steps:
+    - template: swagger-job-template/publish-swagger-job.yml
+      parameters:
+        DOTNETSDKVERSION: ${{ parameters.DOTNETSDKVERSION }}
+        CONFIGURATION: ${{ parameters.CONFIGURATION }}
+        WEBAPIS: ${{ parameters.WEBAPIS }}
+        nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+
+    - template: azureapi-job-template/azureapi-package-job.yml # Template reference
+      parameters:
+        DOTNETSDKVERSION: ${{ parameters.DOTNETSDKVERSION }}
+        CONFIGURATION: ${{ parameters.CONFIGURATION }}
+        SOURCE_ARTIFACT: ${{ parameters.SOURCE_ARTIFACT }}
+        nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}

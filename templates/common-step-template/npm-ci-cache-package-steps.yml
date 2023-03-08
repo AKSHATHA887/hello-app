@@ -1,0 +1,30 @@
+parameters:    
+  - name: cacheVersionNodeModules
+    default: '1'
+  - name: cacheVersionCypress
+    default: '1'
+  - name: enabled_cacheNodeModules
+    default: true
+  - name: enabled_cacheCypress
+    default: true
+steps:
+  - task: Cache@2
+    displayName: 'cache npm ci'
+    inputs:
+      key: 'npm_ci | ${{ parameters.cacheVersionNodeModules }} | "$(Agent.OS)" | package.json'
+      path: '$(Build.SourcesDirectory)/node_modules'
+      cacheHitVar: cacheNodeModulesRestored
+    enabled: ${{ parameters.enabled_cacheNodeModules }}
+  - task: Cache@2
+    displayName: 'cache cypress folder'
+    inputs:
+      key: 'cypress | ${{ parameters.cacheVersionCypress }} | "$(Agent.OS)" | package.json'
+      path: /home/vsts/.cache/Cypress
+      cacheHitVar: cacheCypressRestored
+    enabled: ${{ parameters.enabled_cacheCypress }}
+  - task: Npm@1
+    displayName: 'npm install'
+    inputs:
+      command: custom
+      customCommand: 'ci --no-save '
+    condition: or(eq(variables['cacheNodeModulesRestored'],False), eq(variables['cacheCypressRestored'],False), and(eq(${{ parameters.cacheVersionCypress }},1), eq(${{ parameters.cacheVersionCypress }}, 1)))

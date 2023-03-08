@@ -1,0 +1,27 @@
+parameters:
+- name: zipFileName
+  default: ''
+- name: artifactName
+  default: ''   
+- name: deployInfraTfFolder
+  default: ''  
+
+steps: 
+- task: ArchiveFiles@2
+  displayName: 'Archive files'
+  inputs:
+    rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
+    includeRootFolder: false
+    archiveFile: '$(build.artifactstagingdirectory)/${{ parameters.zipFileName }}'
+
+- bash: |
+    cp $(build.artifactstagingdirectory)/${{ parameters.zipFileName }} $(Build.SourcesDirectory)/${{ parameters.deployInfraTfFolder }}/
+  displayName: 'Copy archived source file to infra folder'
+  enabled: true
+
+- task: ArchiveFiles@2
+  displayName: 'Build pipeline artifact'
+  inputs:
+    rootFolderOrFile: $(Build.SourcesDirectory)/infra
+    archiveFile: $(build.artifactstagingdirectory)/${{ parameters.artifactName }}-$(build.buildnumber).zip
+  enabled: true

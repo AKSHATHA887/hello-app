@@ -1,0 +1,4 @@
+steps:
+- task: CIODevOps.http-security-headers-build-release-task.custom-build-release-task.CheckHTTPSecurityHeader@1
+  displayName: 'CheckHTTPSecurityHeader'
+  enabled: true

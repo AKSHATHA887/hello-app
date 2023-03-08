@@ -1,0 +1,21 @@
+parameters:
+- name: ASAP_PROJECT_ID
+  default: ''
+- name: AIR_ID
+  default: ''
+
+stages: 
+- stage: code_compliance_check
+  displayName: Code Compliance Scan
+  jobs:
+  - job: security_asap
+    displayName: ASAP Security Scan
+    steps:
+    - template: security-job-template/security-asap-job.yml
+      parameters:
+        AIR_ID: ${{ parameters.AIR_ID }}
+    - template: security-job-template/security-check-http-security-header-job.yml
+  - job: metadata_builder
+    displayName: REBAR Metadata Builder
+    steps:
+    - template: security-job-template/security-rebar-metadata-builder.yml

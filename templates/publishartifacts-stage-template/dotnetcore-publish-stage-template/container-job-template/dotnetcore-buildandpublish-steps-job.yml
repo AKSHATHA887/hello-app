@@ -1,0 +1,35 @@
+
+# jobs:
+# - job: dotnetcore_build_and_publish
+steps:
+  - task: CopyFiles@2
+    displayName: 'Copy Files to: $(build.artifactstagingdirectory)'
+    inputs:
+      SourceFolder: $(Build.SourcesDirectory)
+      Contents: |
+        infra/**
+        Dockerfile
+        azure-pipelines-ci.yml
+        azure-pipelines-cd.yml
+        azure-pipeline-template/**
+      CleanTargetFolder: true
+      OverWrite: true
+      TargetFolder: $(Build.ArtifactStagingDirectory)
+    enabled: true
+
+  - task: ArchiveFiles@2
+    displayName: Archive source
+    inputs:
+      rootFolderOrFile: $(Build.ArtifactStagingDirectory)
+      includeRootFolder: true
+      archiveType: zip
+      archiveFile: '$(Pipeline.Workspace)/$(INFRA_LAYER_FOLDER)-$(build.buildnumber).zip'
+      replaceExistingArchive: true
+    enabled: true
+
+  - task: PublishBuildArtifacts@1
+    displayName: Publish Artifact
+    inputs:
+      PathtoPublish: $(Pipeline.Workspace)/$(INFRA_LAYER_FOLDER)-$(build.buildnumber).zip
+      ArtifactName: build-bundle
+    enabled: true

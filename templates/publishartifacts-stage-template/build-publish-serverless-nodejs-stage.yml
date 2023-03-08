@@ -1,0 +1,77 @@
+##############################################################
+################ NodeJs Package Artifacts Template ##################
+##############################################################
+
+parameters:
+- name: VMIMAGE
+  default: ''
+
+stages: 
+- stage: package_artifacts
+  displayName: Package Builds
+  jobs:
+  - job: package
+    displayName: Package
+    pool:
+      vmImage: 'ubuntu-latest'   
+    steps:
+      - task: Npm@1
+        displayName: 'npm install'
+        inputs:
+          command: custom
+
+          customCommand: 'ci --no-save '
+
+      - task: PowerShell@2
+        displayName: 'Emit openapi if config exists'
+        inputs:
+          targetType: 'inline'
+          script: |
+            $json = Get-Content -Path $(Build.SourcesDirectory)/package.json | ConvertFrom-Json | select-object -ExpandProperty scripts
+            if($json.psobject.properties.name -match "emit-swagger")
+            {
+              npm run emit-swagger
+            }
+          workingDirectory: '$(Build.SourcesDirectory)'
+
+      - task: CopyFiles@2
+        displayName: 'Copy Files to: $(build.artifactstagingdirectory)'
+        inputs:
+          Contents: 'openapi.json'
+          TargetFolder: '$(build.artifactstagingdirectory)'
+          CleanTargetFolder: true
+          OverWrite: true
+        enabled: true
+
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: '$(build.artifactstagingdirectory)'
+          ArtifactName: openapi
+          ArtifactType: Container
+        displayName: 'Publish artifacts - openapi'
+
+      - task: Npm@1
+        displayName: 'Npm build'
+        inputs:
+          command: custom
+          verbose: false
+          customCommand: 'run buildpackage'
+        enabled: true
+
+      - task: CopyFiles@2
+        displayName: 'Copy Files to: $(build.artifactstagingdirectory)'
+        inputs:
+          SourceFolder: 'pkg_dist'
+          Contents: '**'
+          TargetFolder: '$(build.artifactstagingdirectory)'
+          CleanTargetFolder: true
+          OverWrite: true
+        enabled: true
+
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Artifact:drop'
+        inputs:
+          PathtoPublish: '$(build.artifactstagingdirectory)'
+          ArtifactName: drop
+          ArtifactType: Container
+        enabled: true 

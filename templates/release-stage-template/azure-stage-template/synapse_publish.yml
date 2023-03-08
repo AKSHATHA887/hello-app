@@ -1,0 +1,386 @@
+parameters:
+- name: azureEnvName
+  default: ''  
+- name: azureDevOpsVarGroups
+  type: object
+  default: []
+- name: azureEnvPfxCertName
+  default: '' 
+- name: azureEnvPemCertName
+  default: ''    
+- name: condition
+  default: ''
+- name: dependsOn
+  default: ''  
+- name: artifactName
+  default: ''  
+- name: ResourceGroupName
+  default: ''
+- name: TemplateParametersFile
+  default: ''  
+- name: pipelineResourceIdentifier
+  default: '' 
+- name: deployInfraTFLayerFolder
+  default: '' 
+- name: azureDevOpsEnvironment
+  default: ''
+- name: workspaceName
+  default: ''
+- name: group
+  default: ''
+- name: azdoJobContainerImg
+  type: string
+  default: 'tf-container-tf1.0-azure2.0:latest'
+  values:
+  - 'tf-container-tf13-azure2.0:latest'
+  - 'tf-container-tf13.5-azure2.0:latest'
+  - 'tf-container-tf14-azure2.0:latest'
+  - 'tf-container-tf1.0-azure2.0:latest'
+  - 'tf-container-ml-tf14:latest'
+
+stages:
+- stage: 'synapse_publish_${{ parameters.azureEnvName }}'
+  ${{ if ne(parameters.dependsOn, '') }}:
+    dependsOn: ${{ parameters.dependsOn }}
+  ${{ if ne(parameters.condition, '') }}:
+    condition: ${{ parameters.condition }}
+  displayName: 'synapse_publish ${{ parameters.azureEnvName }}'
+  variables:
+  - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+      - group: ${{variableGroup}}
+  jobs:
+    - deployment: synapse_publish
+      displayName: synapse_publish_job ${{ parameters.azureEnvName }}
+      pool:
+        vmImage: $(vmUbuntuImage)
+      container:
+        image: acr5064.azurecr.io/${{ parameters.azdoJobContainerImg }}
+        endpoint: CIO-5064-Tfmod-Pull-ACR
+      workspace:
+        clean: all
+      environment: ${{ parameters.azureDevOpsEnvironment }}
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - checkout: self
+              persistCredentials: true
+            - download: current
+              artifact: main
+
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file pfx'
+              inputs:
+                secureFile: ${{ parameters.azureEnvPfxCertName }}
+              enabled: true
+
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file pem'
+              inputs:
+                secureFile: ${{ parameters.azureEnvPemCertName }}
+              enabled: true
+
+            - download: ${{ parameters.pipelineResourceIdentifier}}
+              enabled: true
+              
+            - task: Powershell@2
+              displayName: Troubleshooting Directory
+              continueOnError: false
+              timeoutInMinutes: 5  
+              inputs:
+                targetType: inline
+                script: |
+                  Get-ChildItem -Path ./ 
+                  Get-ChildItem -Path ./ -recurse
+                workingDirectory: $(Pipeline.Workspace)       
+              enabled: true
+
+            - task: ExtractFiles@1
+              displayName: 'Extract Artifact'
+              inputs:
+                archiveFilePatterns: '$(Pipeline.Workspace)/${{ parameters.pipelineResourceIdentifier }}/${{ parameters.artifactName }}/${{ parameters.artifactName }}-*.zip'
+                destinationFolder: '$(Pipeline.Workspace)/${{ parameters.artifactName }}-extract'
+                cleanDestinationFolder: true
+              enabled: true
+        
+            - task: Powershell@2
+              displayName: Authenticate Azure CLI and PowerShell
+              continueOnError: false
+              timeoutInMinutes: 5  
+              inputs:
+                targetType: inline
+                script: |
+                  #Authenticate Cli
+                  & "/sharedfolder/test/Set-AuthenticationContext.ps1" -usesCertificate $True
+                workingDirectory: $(Pipeline.Workspace)/${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+              env:
+                ARM_CLIENT_CERTIFICATE_PASSWORD: $(ARM_CLIENT_CERTIFICATE_PASSWORD)
+                ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+                ARM_TENANT_ID: $(ARM_TENANT_ID)
+                ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+                ARM_CLIENT_CERTIFICATE_PATH: $(Agent.TempDirectory)/${{ parameters.azureEnvPfxCertName }}
+              enabled: true
+
+            - task: Powershell@2
+              displayName: Publishing Artifacts
+              continueOnError: false
+              inputs:
+                targetType: inline
+                script: |
+                    #####
+                    #Validates the workspace
+                    #####
+                    Write-Host "Checking workspace"
+                    if (Get-AzSynapseWorkspace -Name ${{ parameters.workspaceName }}){
+                        Write-Host "Workspace found"
+                    }
+                    else{
+                        Write-Host "Workspace was not found, please check name of workspace"
+                    }
+
+                    ##########
+                    # #Grant Synapse User role
+                    ##########
+                    $group = az ad group show --group '${{ parameters.group }}' |ConvertFrom-Json -ErrorAction 'silentlycontinue'
+                    New-AzSynapseRoleAssignment -WorkspaceName ${{ parameters.workspaceName }} -RoleDefinitionName "Synapse Monitoring Operator" -ObjectID $group.objectId -ErrorAction 'silentlycontinue'
+                    New-AzSynapseRoleAssignment -WorkspaceName ${{ parameters.workspaceName }} -RoleDefinitionName "Synapse Credential User" -ObjectID $group.objectId -ErrorAction 'silentlycontinue'
+                    ##########
+                    # Gets the content of the template parameters file, assigns to variable para and creates a hashtable that holds the names of all the parameters that is used get the names and update the value where needed. 
+                    $para = Get-Content -Path $(Pipeline.Workspace)/${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}/${{ parameters.TemplateParametersFile }} | ConvertFrom-Json
+                    $ht2 = @{}
+                    $para.parameters.psobject.properties | ForEach-Object { $ht2[$_.Name] = $_.Value }
+                    $names = $ht2.Keys.GetEnumerator() | Sort-Object Name
+                    ##################
+                    #Creates the linkedService in new workspace
+                    ##################
+                    
+                    $linkedService_names = Get-ChildItem -Path $(Pipeline.Workspace)/main/linkedService -ErrorAction 'silentlycontinue'
+                    for ($i = 0; $i -lt $linkedService_names.count; $i++)
+                    {
+                        if ($linkedService_names.count -eq 1) {
+                            $linkedService = $linkedService_names.Name
+                            $linkedServicename = $linkedService_names.Name.Replace('.json', '')
+                        }
+                        else {
+                            $linkedService = $linkedService_names.Name[$i]
+                            $linkedServicename = $linkedService_names.Name[$i].Replace('.json', '')
+                        }
+                        Write-Host $linkedServicename
+                        for ($j = 0; $j -lt $names.count; $j++)
+                        {
+                            $l = "_"
+                            $check = $linkedServicename + $l
+                            if ($names[$j].Contains($check)) {
+                                $object = $names[$j]                             
+                                if ($para.parameters.$object.value -ne ""){
+                                    $address = $para.parameters.$object.value
+                                    break
+                                }
+                                else{
+                                    $address = ""
+                                }
+                            }  
+                        }
+
+                        if (($null -ne $address) -and ( $address -ne "")) {
+                            $file = Get-Content $(Pipeline.Workspace)/main/linkedService/$linkedService | ConvertFrom-Json
+                            if ($file.properties.typeProperties.PSObject.Properties.Name.Count -eq 1){            
+                                $type = $file.properties.typeProperties.PSObject.Properties.Name
+                                $file.properties.typeProperties.$type = $address
+                                $file = $file | ConvertTo-Json
+                            }
+                            elseif($file.properties.typeProperties.PSObject.Properties.Name.Count -gt 1){
+                                $type = $file.properties.typeProperties.PSObject.Properties.Name[0]
+                                $file.properties.typeProperties.$type = $address
+                                $file = $file | ConvertTo-Json
+                            }
+                            else{
+                              file = ""
+                            }
+                        }
+
+                        if ($linkedService.Contains("WorkspaceDefault")){
+                            Continue
+                        }
+
+                        if (($null -ne $file) -and ($file -ne "") ){
+                            Set-Content -Path "$(Pipeline.Workspace)/main/linkedService/$linkedService" -Value "$file"
+                            Set-AzSynapseLinkedService -WorkspaceName ${{ parameters.workspaceName }} -Name $linkedServicename -DefinitionFile "$(Pipeline.Workspace)/main/linkedService/$linkedService" -ErrorAction 'silentlycontinue' 
+                        }else{     
+                            Set-AzSynapseLinkedService -WorkspaceName ${{ parameters.workspaceName }} -Name $linkedServicename -DefinitionFile "$(Pipeline.Workspace)/main/linkedService/$linkedService" -ErrorAction 'silentlycontinue' 
+                        }
+                          
+                    }
+
+                    ##################
+                    #Creates the sqlScripts in new workspace
+                    ##################
+                    $sqlScript_names = Get-ChildItem $(Pipeline.Workspace)/main/sqlscript -ErrorAction 'silentlycontinue'
+                    for (($i = 0); $i -lt $sqlScript_names.count; $i++)
+                    {
+                        if (($sqlScript_names.count -eq 1) -and ($sqlScript_names.Name.Contains('.sql'))) {
+                            $sqlScript = $sqlScript_names.Name
+                            $sqlScriptname = $sqlScript_names.Name.Replace('.sql', '')
+                            Write-Host $sqlScriptname
+                            Set-AzSynapseSqlScript -WorkspaceName ${{ parameters.workspaceName }} -Name $sqlScriptname -DefinitionFile "$(Pipeline.Workspace)/main/sqlscript/$sqlscript" -ErrorAction 'silentlycontinue'
+                        }
+                        elseif ($sqlScript_names.Name[$i].Contains('.sql')){
+                            $sqlScript = $sqlScript_names.Name[$i]
+                            $sqlScriptname = $sqlScript_names.Name[$i].Replace('.sql', '')
+                            Write-Host $sqlScriptname
+                            Set-AzSynapseSqlScript -WorkspaceName ${{ parameters.workspaceName }} -Name $sqlScriptname -DefinitionFile "$(Pipeline.Workspace)/main/sqlscript/$sqlscript" -ErrorAction 'silentlycontinue'
+                        }
+                    }
+
+                    ##################
+                    #Creates the notebook in new workspace
+                    ##################
+                    $notebook_names = Get-ChildItem $(Pipeline.Workspace)/main/notebook -ErrorAction 'silentlycontinue'
+                    Write-Host $notebook_names 
+                    for (($i = 0); $i -lt $notebook_names.count; $i++)
+                    {
+                        if (($notebook_names.count -eq 1) -and ($notebook_names.Name.Contains('.ipynb'))) {
+                            $notebook = $notebook_names.Name
+                            $notebookname = $notebook_names.Name.Replace('.ipynb', '')
+                            Write-Host $notebookname
+                            Set-AzSynapseNotebook  -WorkspaceName ${{ parameters.workspaceName }} -Name $notebookname -DefinitionFile "$(Pipeline.Workspace)/main/notebook/$notebook" -ErrorAction 'silentlycontinue'
+                        }
+                        elseif ($notebook_names.Name[$i].Contains('.ipynb')){
+                            $notebook = $notebook_names.Name[$i]
+                            $notebookname = $notebook_names.Name[$i].Replace('.ipynb', '')
+                            Write-Host $notebookname
+                            Set-AzSynapseNotebook  -WorkspaceName ${{ parameters.workspaceName }} -Name $notebookname -DefinitionFile "$(Pipeline.Workspace)/main/notebook/$notebook" -ErrorAction 'silentlycontinue'
+                        }
+                    }
+                    ##################
+                    #Creates the spark jobs in new workspace
+                    ##################
+                    $spark_names = Get-ChildItem $(Pipeline.Workspace)/main/sparkJobDefinition -ErrorAction 'silentlycontinue'
+                    for (($i = 0); $i -lt $spark_names.count; $i++)
+                    {
+                        if ($spark_names.count -eq 1) {
+                            $spark = $spark_names.Name
+                            $sparkname = $spark_names.Name.Replace('.json', '')
+                        }
+                        else {
+                            $spark = $spark_names.Name[$i]
+                            $sparkname = $spark_names.Name[$i].Replace('.json', '')
+                        }
+                        Write-Host $sparkname
+                        Write-Host $spark
+                        Set-AzSynapseSparkJobDefinition  -WorkspaceName ${{ parameters.workspaceName }} -Name $sparkname -DefinitionFile "$(Pipeline.Workspace)/main/sparkJobDefinition/$spark" -ErrorAction 'silentlycontinue'
+                    }
+                    ##################
+                    #Creates the dataflows in new workspace
+                    ##################
+                    $dataflow_names = Get-ChildItem $(Pipeline.Workspace)/main/dataflow -ErrorAction 'silentlycontinue'
+                    for (($i = 0); $i -lt $dataflow_names.count; $i++)
+                    {
+                        Write-Host "test"
+                        if ($dataflow_names.count -eq 1) {
+                            $dataflow = $dataflow_names.Name
+                            $dataflowname = $dataflow_names.Name.Replace('.json', '')
+                        }
+                        else {
+                            $dataflow = $dataflow_names.Name[$i]
+                            $dataflowname = $dataflow_names.Name[$i].Replace('.json', '')
+                        }
+                        Write-Host $dataflowname
+                        Set-AzSynapseDataFlow -WorkspaceName ${{ parameters.workspaceName }} -Name $dataflowname -DefinitionFile "$(Pipeline.Workspace)/main/dataflow/$dataflow" -ErrorAction 'silentlycontinue'
+                    }
+                    
+                    ##################
+                    #Creates the dataset in new workspace
+                    ##################
+                    $dataset_names = Get-ChildItem $(Pipeline.Workspace)/main/dataset -ErrorAction 'silentlycontinue'
+                    for (($i = 0); $i -lt $dataset_names.count; $i++)
+                    {
+                        if ($dataset_names.count -eq 1) {
+                            $dataset = $dataset_names.Name
+                            $datasetname = $dataset_names.Name.Replace('.json', '')
+                        }
+                        else {
+                            $dataset = $dataset_names.Name[$i]
+                            $datasetname = $dataset_names.Name[$i].Replace('.json', '')
+                        }
+                        Write-Host $datasetname
+                        Set-AzSynapseDataset -WorkspaceName ${{ parameters.workspaceName }} -Name $datasetname -DefinitionFile "$(Pipeline.Workspace)/main/dataset/$dataset" -ErrorAction 'silentlycontinue'
+                    }
+
+                    ##################
+                    #Creates the pipelines in new workspace
+                    ##################
+                    $pipeline_names = Get-ChildItem $(Pipeline.Workspace)/main/pipeline -ErrorAction 'silentlycontinue'
+                    for (($i = 0); $i -lt $pipeline_names.count; $i++)
+                    {
+                        if ($pipeline_names.count -eq 1) {
+                            $pipe = $pipeline_names.Name
+                            $pipename = $pipeline_names.Name.Replace('.json', '')
+                        }
+                        else {
+                            $pipe = $pipeline_names.Name[$i]
+                            $pipename = $pipeline_names.Name[$i].Replace('.json', '')
+                        } 
+                        Write-Host $pipename
+                        Set-AzSynapsePipeline -WorkspaceName ${{ parameters.workspaceName }} -Name $pipename -DefinitionFile "$(Pipeline.Workspace)/main/pipeline/$pipe" -ErrorAction 'silentlycontinue'
+                    }
+
+                    ##################
+                    #Creates the triggers in new workspace
+                    ##################
+
+                    $trigger_names = Get-ChildItem $(Pipeline.Workspace)/main/trigger -ErrorAction 'silentlycontinue'
+                    for (($i = 0); $i -lt $trigger_names.count; $i++)
+                    {
+                        if ($trigger_names.count -eq 1) {
+                            $trigger = $trigger_names.Name
+                            $triggername = $trigger_names.Name.Replace('.json', '')
+                        }
+                        else {
+                            $trigger = $trigger_names.Name[$i]
+                            $triggername = $trigger_names.Name[$i].Replace('.json', '')
+                        }
+
+                        for ($j = 0; $j -lt $names.count; $j++)
+                        {
+                           $l = "_"
+                           $check = $triggername + $l
+                           $address = ""
+                           if ($names[$j].Contains($check)) {
+                               $object = $names[$j]
+                               if ($para.parameters.$object.value -ne ""){
+                                   $address = $para.parameters.$object.value
+                                   break
+                               }
+                               else {
+                                   $address = ""
+                               }
+                           }       
+                        }
+
+                        Write-Host $triggername
+                        $file = ""
+                        if (($null -ne $address) -and ( $address -ne "")) {
+                            $file = Get-Content $(Pipeline.Workspace)/main/trigger/$trigger | ConvertFrom-Json
+                            if ($file.properties.typeProperties.scope -ne ""){  
+                                $file.properties.typeProperties.scope = $address
+                                $file = $file | ConvertTo-Json -Depth 3
+                            }
+                        }
+            
+                        if ($file -ne ""){
+                            Set-Content -Path "$(Pipeline.Workspace)/main/trigger/$trigger" -Value "$file" 
+                            Set-AzSynapseTrigger  -WorkspaceName ${{ parameters.workspaceName }} -Name $triggername -DefinitionFile "$(Pipeline.Workspace)/main/trigger/$trigger" -ErrorAction 'silentlycontinue'
+                        }else{    
+                            Set-AzSynapseTrigger  -WorkspaceName ${{ parameters.workspaceName }} -Name $triggername -DefinitionFile "$(Pipeline.Workspace)/main/trigger/$trigger" -ErrorAction 'silentlycontinue'
+                        }                       
+                    }
+
+                workingDirectory: $(Pipeline.Workspace)/${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+              env:
+                ARM_CLIENT_CERTIFICATE_PASSWORD: $(ARM_CLIENT_CERTIFICATE_PASSWORD)
+                ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+                ARM_TENANT_ID: $(ARM_TENANT_ID)
+                ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+                ARM_CLIENT_CERTIFICATE_PATH: $(Agent.TempDirectory)/${{ parameters.azureEnvPfxCertName }}
+              enabled: true

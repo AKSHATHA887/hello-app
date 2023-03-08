@@ -1,0 +1,44 @@
+stages:
+- stage: code_quality
+  displayName: Code Quality Checks
+  jobs: 
+  - job: unit_test
+    displayName: Lint and Unit Test
+    pool:
+      vmImage: 'ubuntu-latest'  
+    steps:
+      - task: Npm@1
+        displayName: 'Npm Install'
+        inputs:
+          verbose: false
+        enabled: true  
+
+      - task: Npm@1
+        displayName: 'npm Lint'
+        inputs:
+          command: custom
+          verbose: false
+          customCommand: 'run lint'
+        enabled: true
+
+      - task: Npm@1
+        displayName: 'Npm test'
+        inputs:
+          command: custom
+          verbose: false
+          customCommand: 'run test:ci'
+        enabled: true
+      - task: PublishTestResults@2
+        displayName: 'Publish Test Results'
+        inputs:
+          testResultsFormat: 'JUnit'
+          mergeTestResults: true
+          testResultsFiles: coverage/junit.xml
+        condition: succeededOrFailed()
+      - task: PublishCodeCoverageResults@1
+        displayName: 'Publish Code Coverage'
+        inputs:
+          codeCoverageTool: Cobertura
+          summaryFileLocation: coverage/cobertura-coverage.xml
+        condition: succeededOrFailed()
+  dependsOn: []

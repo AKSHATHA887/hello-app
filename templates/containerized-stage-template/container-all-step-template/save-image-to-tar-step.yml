@@ -1,0 +1,45 @@
+parameters:
+# Mandatory Parameters
+- name: dockerImgName
+  default: ''
+- name: dockerImgTagName
+  default: ''
+
+steps:
+# Use the docker save command to export the container image we have just created into a .tar file.
+- task: Docker@2
+  displayName: 'Save image to TAR'
+  inputs:
+    repository: ${{ parameters.dockerImgName }}
+    command: save
+    arguments: '--output $(build.artifactstagingdirectory)/${{ parameters.dockerImgName }}.image.tar ${{ parameters.dockerImgName }}:${{ parameters.dockerImgTagName }}'
+    addPipelineData: false
+  enabled: false
+
+# Build application docker image
+- task: Powershell@2
+  displayName: Save image to TAR
+  name: save_image_to_TAR
+  continueOnError: false
+  timeoutInMinutes: 60
+  inputs:
+    targetType: inline
+    script: |
+      $cmdArgs = @(
+          "save"
+          "-o"
+          "`"$(build.artifactstagingdirectory)/${{ parameters.dockerImgName }}.image.tar`""
+          "`"${{ parameters.dockerImgName }}:${{ parameters.dockerImgTagName }}`""
+      )
+      Write-Host "[Debug] Initial cmdArgs is $cmdArgs"
+      docker $cmdArgs
+    failOnStderr: true
+  enabled: true   
+
+#  Publish the exported image tar "normal file" as AzureDevOps pipeline artifact
+- task: PublishPipelineArtifact@1
+  displayName: 'Publishing Image as Pipeline Artifact'
+  inputs:
+    path: $(build.artifactstagingdirectory)
+    artifact: ${{ parameters.dockerImgName }}
+  enabled: true

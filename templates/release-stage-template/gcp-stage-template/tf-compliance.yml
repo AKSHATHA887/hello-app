@@ -1,0 +1,53 @@
+parameters:
+- name: vmImage
+  default: 'ubuntu-latest'
+- name: deployInfraTFLayerFolder
+  default: ''
+- name: asapProjectId
+  default: ''
+- name: airId
+  default: ''
+- name: gkeAddKubeCtlProvider
+  type: boolean
+  default: false
+- name: azdoJobContainerImg
+  type: string
+  default: 'tf-consume-job-container-tf12:latest'
+  values:
+  - 'tf-consume-job-container:latest'
+  - 'tf-consume-job-container-tf12:latest'
+  - 'tf-consume-job-container-tf13-gcp:latest'
+  - 'tf-consume-job-container-tf14-gcp:latest'
+  - 'tf-container-ml-tf14:latest'
+  - 'tf-consume-job-container-tf1-gcp:latest'
+- name: enableTFFormat
+  type: boolean
+  default: true
+- name: enableTFModPromoteScan
+  type: boolean
+  default: false
+
+stages: 
+- stage: IaC_Compliance
+  jobs:     
+  - job: IaC_Compliance
+    displayName: 'Terraform Infra Scan'
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    container:
+      image: acr5064.azurecr.io/${{ parameters.azdoJobContainerImg }}
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    steps:
+    - template: /templates/compliance-stage-template/security-job-template/security-check-http-security-header-job.yml
+    - ${{ if ne(parameters.airId, '') }}:
+      - template: /templates/compliance-stage-template/security-job-template/security-asap-job.yml
+        parameters:
+          AIR_ID: ${{ parameters.airId }}
+    - template: /templates/compliance-stage-template/compliance-step-template/security-sca-applicationcodescan.yml
+      parameters:
+        AIR_ID: ${{ parameters.airId }}
+    - template: /templates/compliance-stage-template/compliance-step-template/compliance-terraform-step.yml
+      parameters:
+        deployInfraTFLayerFolder: ${{ parameters.deployInfraTFLayerFolder }}
+        enableTFFormat: ${{ parameters.enableTFFormat }}
+        enableTFModPromoteScan: ${{ parameters.enableTFModPromoteScan }}

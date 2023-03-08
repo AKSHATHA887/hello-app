@@ -1,0 +1,240 @@
+parameters:
+- name: cloudProvider
+  displayName: Cloud Provider
+  type: string
+  default: 'UNSET'
+  values:
+  - UNSET
+  - aws1.5
+  - aws2.0
+  - azure1.5
+  - azure2.0
+- name: cloudEnv
+  displayName: Cloud Environment
+  type: string
+  default: 'UNSET'
+  values:
+  - sbx
+  - npd
+  - prd
+  - brd
+  - brs
+  - brp
+- name: airId
+  type: string
+- name: msHostedPoolVmImage
+  default: 'ubuntu-latest'
+- name: azureDevOpsSecureFiles
+  type: object
+  default: []
+- name: remoteTerraformStateFileToUnlock
+  default: ''
+- name: condition
+  default: ''
+- name: dependsOn
+  type: object
+  default: 
+    - PREVIOUS 
+- name: azureDevOpsEnvironment
+  default: ''
+
+stages:
+- stage: Terraform_State_Force_Unlock_${{ replace(parameters.cloudProvider,'.','_') }}_${{ parameters.cloudEnv }}
+  ${{ if and(ne(parameters.dependsOn, ''), ne(join(';',parameters.dependsOn), 'PREVIOUS')) }}:
+    dependsOn: ${{ parameters.dependsOn }}
+  ${{ if ne(parameters.condition, '') }}:
+    condition: ${{ parameters.condition }}
+  displayName: Terraform State Force Unlock ${{ replace(parameters.cloudProvider,'.','_') }}_${{ parameters.cloudEnv }}
+  variables:
+  - ${{ if and(eq(parameters.cloudProvider, 'aws1.5'), eq(parameters.cloudEnv, 'brd')) }}:   
+      - group: cio-cloud-aws-bridge-b03-${{ parameters.airId }}
+      - group: cio-cloud-aws-bridge-b03-${{ parameters.airId }}-remote-backend
+  - ${{ if and(eq(parameters.cloudProvider, 'aws1.5'), eq(parameters.cloudEnv, 'brs')) }}:   
+      - group: cio-cloud-aws-bridge-b02-${{ parameters.airId }}
+      - group: cio-cloud-aws-bridge-b02-${{ parameters.airId }}-remote-backend
+  - ${{ if and(eq(parameters.cloudProvider, 'aws1.5'), eq(parameters.cloudEnv, 'brp')) }}:   
+      - group: cio-cloud-aws-bridge-b01-${{ parameters.airId }}
+      - group: cio-cloud-aws-bridge-b01-${{ parameters.airId }}-remote-backend
+  - ${{ if and(eq(parameters.cloudProvider, 'aws2.0'), eq(parameters.cloudEnv, 'sbx')) }}:   
+      - group: cio-cloud-aws-03-${{ parameters.airId }}
+      - group: cio-cloud-aws-03-${{ parameters.airId }}-remote-backend
+  - ${{ if and(eq(parameters.cloudProvider, 'aws2.0'), eq(parameters.cloudEnv, 'npd')) }}:   
+      - group: cio-cloud-aws-02-${{ parameters.airId }}
+      - group: cio-cloud-aws-02-${{ parameters.airId }}-remote-backend
+  - ${{ if and(eq(parameters.cloudProvider, 'aws2.0'), eq(parameters.cloudEnv, 'prd')) }}:   
+      - group: cio-cloud-aws-01-${{ parameters.airId }}
+      - group: cio-cloud-aws-01-${{ parameters.airId }}-remote-backend
+  - ${{ if and(eq(parameters.cloudProvider, 'azure1.5'), eq(parameters.cloudEnv, 'brd')) }}:  
+      - group: cio-cloud-azure-brd-${{ parameters.airId }}
+  - ${{ if and(eq(parameters.cloudProvider, 'azure1.5'), eq(parameters.cloudEnv, 'brs')) }}:  
+      - group: cio-cloud-azure-brs-${{ parameters.airId }}
+  - ${{ if and(eq(parameters.cloudProvider, 'azure1.5'), eq(parameters.cloudEnv, 'brp')) }}:  
+      - group: cio-cloud-azure-brp-${{ parameters.airId }}
+  - ${{ if and(eq(parameters.cloudProvider, 'azure2.0'), eq(parameters.cloudEnv, 'sbx')) }}:  
+      - group: cio-cloud-azure-sbx-${{ parameters.airId }}
+  - ${{ if and(eq(parameters.cloudProvider, 'azure2.0'), eq(parameters.cloudEnv, 'npd')) }}:  
+      - group: cio-cloud-azure-nprd-${{ parameters.airId }}
+  - ${{ if and(eq(parameters.cloudProvider, 'azure2.0'), eq(parameters.cloudEnv, 'prd')) }}:  
+      - group: cio-cloud-azure-prd-${{ parameters.airId }}
+  jobs:
+  - deployment: Terraform_State_Force_Unlock_${{ replace(parameters.cloudProvider,'.','_') }}_${{ parameters.cloudEnv }}
+    displayName: Terraform State Force Unlock ${{ replace(parameters.cloudProvider,'.','_') }}_${{ parameters.cloudEnv }}
+    pool:
+      vmImage: ${{ parameters.msHostedPoolVmImage }}
+    container:
+      image: acr5064.azurecr.io/tf-container-tf1.0-azure2.0:latest
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    workspace:
+      clean: all
+    ${{ if ne(parameters.azureDevOpsEnvironment, '') }}:
+      environment: ${{ parameters.azureDevOpsEnvironment }}
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          ########################## Download SP Credential for AWS 1.5 ##########################
+          - ${{ if and(eq(parameters.cloudProvider, 'aws1.5'), eq(parameters.cloudEnv, 'brd')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b3aws-bridge-service-principal.pem'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b3aws-bridge-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b3aws-bridge-service-principal.pfx'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b3aws-bridge-service-principal.pfx
+          - ${{ if and(eq(parameters.cloudProvider, 'aws1.5'), eq(parameters.cloudEnv, 'brs')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b2aws-bridge-service-principal.pem'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b2aws-bridge-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b2aws-bridge-service-principal.pfx'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b2aws-bridge-service-principal.pfx
+          - ${{ if and(eq(parameters.cloudProvider, 'aws1.5'), eq(parameters.cloudEnv, 'brp')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b1aws-bridge-service-principal.pem'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b1aws-bridge-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b1aws-bridge-service-principal.pfx'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b1aws-bridge-service-principal.pfx        
+          ########################## Download SP Credential for AWS 2.0 ##########################  
+          - ${{ if and(eq(parameters.cloudProvider, 'aws2.0'), eq(parameters.cloudEnv, 'sbx')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}03aws-service-principal.pem'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}03aws-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}03aws-service-principal.pfx'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}03aws-service-principal.pfx
+          - ${{ if and(eq(parameters.cloudProvider, 'aws2.0'), eq(parameters.cloudEnv, 'npd')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}02aws-service-principal.pem'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}02aws-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}02aws-service-principal.pfx'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}02aws-service-principal.pfx
+          - ${{ if and(eq(parameters.cloudProvider, 'aws2.0'), eq(parameters.cloudEnv, 'prd')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}01aws-service-principal.pem'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}01aws-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}01aws-service-principal.pfx'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}01aws-service-principal.pfx 
+          ########################## Download SP Credential for Azure 1.5 ##########################
+          - ${{ if and(eq(parameters.cloudProvider, 'azure1.5'), eq(parameters.cloudEnv, 'brd')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b3-service-principal.pem'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b3-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b3-service-principal.pfx'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b3-service-principal.pfx
+          - ${{ if and(eq(parameters.cloudProvider, 'azure1.5'), eq(parameters.cloudEnv, 'brs')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b2-service-principal.pem'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b2-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b2-service-principal.pfx'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b2-service-principal.pfx
+          - ${{ if and(eq(parameters.cloudProvider, 'azure1.5'), eq(parameters.cloudEnv, 'brp')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b1-service-principal.pem'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b1-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure1.5-${{ parameters.airId }}b1-service-principal.pfx'
+              inputs:
+                secureFile: azure1.5-${{ parameters.airId }}b1-service-principal.pfx        
+          ########################## Download SP Credential for Azure 2.0 ##########################  
+          - ${{ if and(eq(parameters.cloudProvider, 'azure2.0'), eq(parameters.cloudEnv, 'sbx')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}03-service-principal.pem'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}03-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}03-service-principal.pfx'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}03-service-principal.pfx
+          - ${{ if and(eq(parameters.cloudProvider, 'azure2.0'), eq(parameters.cloudEnv, 'npd')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}02-service-principal.pem'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}02-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}02-service-principal.pfx'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}02-service-principal.pfx
+          - ${{ if and(eq(parameters.cloudProvider, 'azure2.0'), eq(parameters.cloudEnv, 'prd')) }}:
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}01-service-principal.pem'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}01-service-principal.pem
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file azure2.0-${{ parameters.airId }}01-service-principal.pfx'
+              inputs:
+                secureFile: azure2.0-${{ parameters.airId }}01-service-principal.pfx 
+          - task: Powershell@2
+            displayName: Terraform Force Unlock
+            name: tf_force_unlock
+            continueOnError: false
+            timeoutInMinutes: 60
+            inputs:
+              targetType: inline
+              script: |
+                & "/sharedfolder/test/Set-AuthenticationContext.ps1" -usesCertificate $true
+                $containerName = "cio-proj$(PROJECT_AIR_ID)$(ENVIRONMENT)tfstate"
+                $accountName = "st506405use2tfstate"
+                $remoteTerraformStateFileToUnlock = "${{ parameters.remoteTerraformStateFileToUnlock }}"
+                Write-Host "[Debug] containerName is: $containerName"
+                Write-Host "[Debug] accountName is: $accountName"
+                Write-Host "[Debug] remoteTerraformStateFileToUnlock is: $remoteTerraformStateFileToUnlock"
+      
+                $blobExists = az storage blob exists --account-name "$accountName" --auth-mode login --name "$remoteTerraformStateFileToUnlock" --container-name "$containerName" | convertFrom-Json
+                Write-Host "[Debug] blobExists $blobExists"
+                if ($null -ne $blobExists -And $blobExists.exists -eq $true) {
+                  Write-Host "[Debug] blob file $remoteTerraformStateFileToUnlock in blob container $containerName exists, start to unlock"
+                  az storage blob lease break -b "$remoteTerraformStateFileToUnlock" -c "$containerName" --account-name "$accountName" --auth-mode login
+                  Write-Host "[Debug] terraform state file unlock completed:"
+                  $blob = az storage blob show --name "$remoteTerraformStateFileToUnlock" --container-name "$containerName" --account-name "$accountName" --auth-mode login | convertFrom-Json
+                  Write-Host $blob.properties.lease
+                } else {
+                  Write-Host "[Debug] blob file $remoteTerraformStateFileToUnlock not exists in blob container $containerName"
+                }
+              failOnStderr: true
+            env:
+              ARM_CLIENT_CERTIFICATE_PATH: $(Agent.TempDirectory)/$(AZURE_PFX_CERT_NAME)
+              ARM_CLIENT_CERTIFICATE_PASSWORD: $(ARM_CLIENT_CERTIFICATE_PASSWORD)
+              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+              ARM_TENANT_ID: $(ARM_TENANT_ID)
+              ARM_SUBSCRIPTION_ID: "3de4faec-c7e9-4255-95af-ab63b5e7c44a"

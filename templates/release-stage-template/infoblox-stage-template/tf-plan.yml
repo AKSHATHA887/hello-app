@@ -1,0 +1,181 @@
+parameters:
+- name: cloudEnvName
+  default: ''
+- name: airId
+  default: ''
+- name: appName
+  default: ''
+- name: azurermBackendStorageContainer
+  default: ''
+- name: azurermBackendStorageContainerBlobKey
+  default: ''
+- name: deployInfraTFLayerFolder
+  default: ''
+- name: azureDevOpsSecureFiles
+  type: object
+  default: []
+- name: pipelineResourceIdentifier
+  default: ''
+- name: artifactName
+  default: ''
+- name: archiveFilePathToExtract
+  default: ''
+- name: azureDevOpsVarGroups
+  type: object
+  default: []
+
+stages:
+- stage: Terraform_Plan_${{ parameters.cloudEnvName }}
+  displayName: 'Terraform Plan ${{ parameters.cloudEnvName }}'
+  ${{ if ne(length(parameters.azureDevOpsVarGroups), 0) }}:
+    variables:
+    - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+      - group: ${{variableGroup}}
+  jobs:
+  - job: Terraform_Plan_${{ parameters.cloudEnvName }}
+    pool:
+      name: USEastUbuntu1604
+    container:
+      image: acr5064.azurecr.io/tf-consume-job-container-infoblox-tf12:latest
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    steps:
+    - powershell: |
+        $airId = "${{ parameters.airId }}".trim()
+        $appName = "${{ parameters.appName }}".trim()
+        $cloudEnvName = "${{ parameters.cloudEnvName }}".trim()
+        $azurermBackendStorageContainer = "${{ parameters.azurermBackendStorageContainer }}".trim()
+        $azurermBackendStorageContainerBlobKey = "${{ parameters.azurermBackendStorageContainerBlobKey }}".trim()
+        if ([string]::IsNullOrEmpty($airId)) {
+            Write-Error "parameter airId is invalid, cannot be empty"
+        }
+        if ([string]::IsNullOrEmpty($appName)) {
+            Write-Error "parameter appName is invalid, cannot be empty"
+        }
+        if ([string]::IsNullOrEmpty($cloudEnvName)) {
+            Write-Error "parameter cloudEnvName is invalid, cannot be empty"
+        }
+        if ([string]::IsNullOrEmpty($azurermBackendStorageContainer)) {
+            Write-Error "parameter azurermBackendStorageContainer is invalid, cannot be empty"
+        }
+        if ([string]::IsNullOrEmpty($azurermBackendStorageContainerBlobKey)) {
+            Write-Error "parameter azurermBackendStorageContainerBlobKey is invalid, cannot be empty"
+        }
+      displayName: 'Validation'
+      enabled: true
+
+    - ${{ each secureFile in parameters.azureDevOpsSecureFiles }}:
+      - task: DownloadSecureFile@1
+        displayName: 'Download secure file ${{secureFile}}'
+        inputs:
+          secureFile: ${{secureFile}}
+        enabled: true
+
+    - download: ${{ parameters.pipelineResourceIdentifier }}
+      enabled: true
+
+    - task: ExtractFiles@1
+      displayName: 'Extract Artifact'
+      inputs:
+        archiveFilePatterns: '$(Pipeline.Workspace)/${{ parameters.pipelineResourceIdentifier }}/${{ parameters.artifactName }}/${{ parameters.archiveFilePathToExtract }}'
+        destinationFolder: '$(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract'
+        cleanDestinationFolder: true
+        overwriteExistingFiles: true
+      enabled: true
+
+    - task: CIODevOps.azuredevOps-build-agent-cf-cli-config-file-generator.custom-build-release-task.AzureDevOps Build Agent TF Cli Config File Generator@0
+      displayName: 'AzureDevOps Build Agent TF Cli Config File Generator'
+      enabled: true
+    
+    - task: qetza.replacetokens.replacetokens-task.replacetokens@3
+      displayName: 'Replace tokens in tfvars for specific environment'
+      inputs:
+        rootDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+        targetFiles: |
+         **/*.tfvars
+      enabled: true
+
+    - bash: |
+       mkdir -p $HOME/.terraform.d/plugins/ && sudo cp /root/.terraform.d/plugins/terraform-provider-infoblox $HOME/.terraform.d/plugins/
+      displayName: 'Prepare terraform infoblox provider'
+
+    - task: Powershell@2
+      displayName: Terraform Init
+      name: tf_init
+      continueOnError: false
+      timeoutInMinutes: 2
+      inputs:
+        targetType: inline
+        script: |
+          $cmdArgs = @(
+              "init"
+              "-plugin-dir=`"$HOME/.terraform.d/plugins/`""
+              "-get-plugins=false"
+              "-backend-config=`"storage_account_name=sa5064iactf`"" 
+              "-backend-config=`"container_name=${{ parameters.azurermBackendStorageContainer }}`""
+              "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+              "./"
+            )
+          Write-Host  $cmdArgs 
+          terraform $cmdArgs
+        failOnStderr: true # Optional
+        workingDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+      env:
+        ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY) 
+      enabled: true
+
+    - bash: |
+        terraform workspace select ${{ parameters.cloudEnvName }} || terraform workspace new ${{ parameters.cloudEnvName }} 
+        terraform workspace list -no-color 
+      displayName: 'Terraform Use Workspace'
+      workingDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+      env:
+        ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY) 
+      enabled: true
+
+    - task: Powershell@2
+      displayName: Terraform Plan
+      name: tf_plan_in_wks
+      continueOnError: false
+      timeoutInMinutes: 60
+      inputs:
+        targetType: inline
+        script: |
+          Get-ChildItem
+          
+          Write-Host "[Info] 1. Start to run terraform init"
+          $cmdArgs = @(
+              "init"
+              "-plugin-dir=`"$HOME/.terraform.d/plugins/`""
+              "-get-plugins=false"
+              "-backend-config=`"storage_account_name=sa5064iactf`"" 
+              "-backend-config=`"container_name=${{ parameters.azurermBackendStorageContainer }}`""
+              "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+              "./"
+            )
+          Write-Host  $cmdArgs 
+          terraform $cmdArgs
+
+          Get-ChildItem
+          
+          Write-Host "[Info] 2. Start to run terraform plan"
+          $cmdArgs = @(
+              "plan"
+              "-input=false"
+              "-out"
+              "`"tfplan.bin`""
+              "-no-color"
+              "-var-file=`"cloud-${{ parameters.cloudEnvName }}.tfvars`""
+              "-var=`"infoblox_username=$($Env:IPAM_ID)`""
+              "-var=`"infoblox_password=$($Env:IPAM_PWD)`""
+          )
+          Write-Host  $cmdArgs
+          terraform $cmdArgs
+
+          Get-ChildItem
+        failOnStderr: true
+        workingDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+      env:
+        IPAM_ID: $(IPAM_ID)
+        IPAM_PWD: $(IPAM_PWD)
+        ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY)
+      enabled: true

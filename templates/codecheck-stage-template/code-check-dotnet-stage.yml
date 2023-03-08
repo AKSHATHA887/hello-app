@@ -1,0 +1,47 @@
+parameters:
+- name: WARNINGTHRESHOLD
+  default: '50'
+- name: COVERAGETHRESHOLD
+  default: '5'
+- name: vmWindowsImage
+  default: 'windows-latest'
+- name: DOTNETSDKVERSION
+  default: ''
+- name: nuGetServiceConnectionName
+  default: ''
+- name: projects
+  default: '**/*.WebApi.csproj'
+
+stages: 
+- stage: code_quality_check
+  displayName: Code Quality Check 
+  jobs:
+  - job: code_analysis
+    displayName: Code Analysis
+    pool:
+      vmImage: ${{ parameters.vmWindowsImage }}
+    steps:
+    - template: dotnetcore-codecheck-job-template/code-analysis-job.yml
+
+  - job: unit_test
+    displayName: Unit Test
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - template: dotnetcore-codecheck-job-template/unit-test-job.yml
+      parameters:
+        WARNINGTHRESHOLD: ${{ parameters.WARNINGTHRESHOLD }}
+        COVERAGETHRESHOLD: ${{ parameters.COVERAGETHRESHOLD }}
+        DOTNETSDKVERSION: ${{ parameters.DOTNETSDKVERSION }}
+        nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+        
+  - job: code_metrics
+    displayName: Code Metrics
+    pool:
+      vmImage: ${{ parameters.vmWindowsImage }}
+    steps:
+    - template: dotnetcore-codecheck-job-template/code-metrics-job.yml
+      parameters:
+        DOTNETSDKVERSION: ${{ parameters.DOTNETSDKVERSION }}
+        nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}  
+        projects: ${{ parameters.projects }}

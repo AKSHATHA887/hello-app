@@ -1,0 +1,49 @@
+##############################################################
+################ Functional Validation Template ##############
+##############################################################
+
+parameters:
+- name: VMIMAGE  # defaults for any parameters that aren't specified
+  default: ''
+- name: DOTNETSDKVERSION  # defaults for any parameters that aren't specified
+  default: ''
+- name: CONTAINER_REGISTRY
+  default: ''
+- name: nuGetServiceConnectionName
+  default: ''  
+- name: restoreDirectory
+  default: 'DotNetRestoreDirectory'  
+  
+stages: 
+- stage: functional_validation_checks
+  displayName: Functional Validation Checks
+  jobs:
+  - job: functional_checks
+    displayName: Lighthouse checks
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}
+    steps:
+      - task: UseDotNet@2
+        displayName: Install DotNet SDK
+        inputs:
+          packageType: 'sdk'
+          version: ${{ parameters.DOTNETSDKVERSION }}    
+  
+  - job: smoke_test
+    displayName: Smoke Test
+    pool:
+      VMIMAGE: ${{ parameters.VMIMAGE }}
+    steps:
+    - ${{ if ne(parameters.nuGetServiceConnectionName, '') }}:
+      - template: /templates/nuget-common/nuget-docker-prereqs-step.yml
+        parameters: 
+          nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+          dotnetSdkVersion: ${{ parameters.DOTNETSDKVERSION }}
+          restoreDirectory: ${{ parameters.restoreDirectory }}
+    - template: dotnetcore-smoketest-job-template/container-webapi-smoke-test-job.yml
+      parameters:
+        CONTAINER_REGISTRY: ${{ parameters.CONTAINER_REGISTRY }}
+        
+
+  
+

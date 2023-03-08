@@ -1,0 +1,4 @@
+steps:
+- task: CIODevOps.build-task.custom-build-task.AuthenticationEnforcement@0
+  displayName: 'AuthenticationEnforcement'
+  enabled: true

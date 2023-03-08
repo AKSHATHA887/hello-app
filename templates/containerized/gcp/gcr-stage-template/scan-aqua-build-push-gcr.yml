@@ -1,0 +1,102 @@
+#####################################################################################################
+# 1. Containerized Docker image bake, scan with Aqua and publish to GCR                             #
+# 2. Aqua Scan cannot be skipped                                                                    #
+#####################################################################################################
+
+parameters: 
+- name: aquaScannerImg
+  default: 'acncio.azurecr.io/aqua-scanner:latest'
+- name: acnCIOACRDockerRegistry
+  default: 'acncio.azurecr.io Read'
+- name: pathToDockerFile
+  default: ''
+- name: dockerImgPathToGCR
+  default: ''
+- name: aquaMgmtConsoleConn
+  default: 'Aqua Prod Console'
+- name: gcrDockerRegistry
+  default: ''
+- name: dockerBuildAdditionalPreSteps
+  type: stepList
+  default: []
+  
+stages: 
+- stage: Scan_Aqua_Build_Push_GCR
+  jobs:
+  - job: Scan_Aqua_Build_Push_GCR
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    steps:
+    - ${{ each step in parameters.dockerBuildAdditionalPreSteps }}:
+      - ${{ step }}
+
+    # Login into ACR to download the aqua scanner
+    - task: Docker@2
+      displayName: Login to ACN CIO ACR
+      inputs:
+        containerRegistry: ${{ parameters.acnCIOACRDockerRegistry }}
+        command: 'login'
+      enabled: true
+
+    # Build application docker image
+    - script: docker build --no-cache -f ${{ parameters.pathToDockerFile }} -t ${{ parameters.dockerImgPathToGCR }} .
+      displayName: Build Docker Image
+      enabled: true
+
+    # Aqua Init
+    - script: |
+            docker build -t ${{ parameters.dockerImgPathToGCR }} -f- . <<EOF
+            FROM ${{ parameters.dockerImgPathToGCR }}
+            USER root:root
+            RUN /microenforcer aqua-init
+            USER appuser:appgroup
+            EOF
+      displayName: 'Aqua-Init'
+      
+    # Pull Common Aqua Scanner docker image
+    - script: docker pull ${{ parameters.aquaScannerImg }}
+      displayName: 'Get Aqua Scanner Image'
+      enabled: true
+
+    # Scan with Aqua
+    - task: aquasecScanner@4
+      displayName: Aqua Scanning Image ${{ parameters.dockerImgPathToGCR }}
+      inputs:
+        image: ${{ parameters.dockerImgPathToGCR }}
+        scanType: 'local'
+        customFlags: '--direct-cc'
+        registerCompliant: true
+        scanner: ${{ parameters.aquaScannerImg }}
+        registry: 'gcr.io'
+        connection: ${{ parameters.aquaMgmtConsoleConn }}
+      enabled: true
+
+      # Logout from ACR
+      - task: Docker@2
+        displayName: Logout from ACN CIO ACR
+        inputs:
+          containerRegistry: ${{ parameters.acnCIOACRDockerRegistry }}
+          command: 'logout'
+        enabled: true
+
+      # Login into GCR to upload our image
+      - task: Docker@2
+        displayName: Login to GCR
+        inputs:
+          containerRegistry: ${{ parameters.gcrDockerRegistry}}
+          dockerRegistryConnection: ${{ parameters.gcrDockerRegistry}}
+          command: 'login'
+        enabled: true
+
+      # Push our image into GCR
+      - script: docker push ${{ parameters.dockerImgPathToGCR }}
+        displayName: 'Push ${{ parameters.dockerImgPathToGCR }} image'
+        enabled: true
+
+      # Logout from GCR
+      - task: Docker@2
+        displayName: Logout from GCR
+        inputs:
+          containerRegistry: ${{ parameters.gcrDockerRegistry}}
+          command: 'logout'
+        enabled: true

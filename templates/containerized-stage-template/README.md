@@ -1,0 +1,5 @@
+1. Instructions of using pipeline template [image-build-stage.yml](https://dev.azure.com/accenturecio08/EnterpriseArchitecture_2641/_git/Azure-Pipelines-Template-AIR2731?version=GBmaster&path=/templates/containerized-stage-template/image-build-stage.yml) for docker image build, scan with aqua and push to container registry for all cloud providers (GCP, AWS 1.5, AWS 2.0, Azure 1.5 and Azure 2.0)
+https://ciodeveloper.accenture.com/nextgencloud/container-image/all-cloud-image-build-stage/
+
+2. Instructions on how to use pipeline template [image-promote-stage.yml](https://dev.azure.com/accenturecio08/EnterpriseArchitecture_2641/_git/Azure-Pipelines-Template-AIR2731?version=GBmaster&path=/templates/containerized-stage-template/image-promote-stage.yml) for image promotion for all cloud providers (GCP, AWS 1.5, AWS 2.0, Azure 1.5 and Azure 2.0)
+https://ciodeveloper.accenture.com/nextgencloud/container-image/all-cloud-image-promote-stage/

@@ -1,0 +1,27 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "autoapi",
+    "version": "1.0.0"
+  },
+  "tags": [
+    {
+      "name": "AirID",
+      "description": "9403"
+    }
+  ],
+  "servers": [
+    {
+      "url": "https://domainname.ciodev.accenture.com",
+      "description": "Development"
+    },
+    {
+      "url": "https://domainname.ciostage.accenture.com",
+      "description": "Staging"
+    },
+    {
+      "url": "https://domainname.accenture.com",
+      "description": "Production"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+parameters:
+- name: VMIMAGE
+  default: ''
+- name : DOTNETSDKVERSION
+  default: ''
+- name: targetFramework
+  default: 'net6.0' #TODO:Default to 3.1, we need to change to net5.0 when we migrate 
+- name: CONFIGURATION
+  default: ''
+- name: PROJECTWORKINGDIRECTORY
+  default: ''
+- name: AWSPACKAGENAME
+  default: ''
+- name: ENVSTAGES
+  type: object
+  default: ['dev','stg','prod']
+- name: nuGetServiceConnectionName
+  default: ''
+
+stages: 
+- stage: build_and_publish
+  displayName: Build and Publish Artifacts
+  jobs:
+  - job: build_package_publish
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}
+    displayName: Build and Publish Artifacts
+    steps:
+    - template: aws-serverless-job-template/aws-serverless-package-step.yml # Template reference
+      parameters:
+        VMIMAGE: ${{ parameters.VMIMAGE }}
+        DOTNETSDKVERSION: ${{ parameters.DOTNETSDKVERSION }}
+        targetFramework: ${{ parameters.targetFramework }}
+        CONFIGURATION: ${{ parameters.CONFIGURATION }}
+        PROJECTWORKINGDIRECTORY: ${{ parameters.PROJECTWORKINGDIRECTORY }}
+        AWSPACKAGENAME: ${{ parameters.AWSPACKAGENAME }}
+        ENVSTAGES: ${{ parameters.ENVSTAGES }}
+        nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}

@@ -1,0 +1,31 @@
+parameters:
+- name: vmImage
+  default: 'ubuntu-latest'
+- name: archiveFolder
+  default: ''
+- name: artifactName
+  default: ''
+- name: additionalPreArchiveSteps
+  type: stepList
+  default: []
+
+stages: 
+- stage: Publish_Artifact
+  jobs:
+  - job: Publish_Artifact
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    steps:
+    - ${{ each step in parameters.additionalPreArchiveSteps }}:
+      - ${{ step }}
+
+    - task: ArchiveFiles@2
+      displayName: 'Archive INFRA_LAYER_FOLDER'
+      inputs:
+        rootFolderOrFile: ${{ parameters.archiveFolder }}
+        archiveFile: '$(Pipeline.Workspace)/${{ parameters.artifactName }}-$(build.buildnumber).zip'
+      enabled: true
+  
+    - publish: $(Pipeline.Workspace)/${{ parameters.artifactName }}-$(build.buildnumber).zip
+      artifact: ${{ parameters.artifactName }}
+      enabled: true

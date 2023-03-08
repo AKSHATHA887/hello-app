@@ -1,0 +1,30 @@
+parameters:
+# Mandatory Parameters
+- name: dockerImgTag
+  default: ''
+- name: dockerRegistry
+  default: ''
+# Optional Parameters
+- name: aquaMgmtConsoleConn
+  default: 'Aqua Prod Console'
+  
+steps:
+
+# Scan with Aqua
+- task: UniversalPackages@0
+  displayName: 'Download Aqua Scanner'
+  inputs:
+    vstsFeed: 'Aqua_AIR9492'
+    vstsFeedPackage: 'aquascanner'
+    vstsPackageVersion: '*'
+- task: aquasecScanner@4
+  displayName: Aqua Scanning Image ${{ parameters.dockerImgTag }}
+  inputs:
+    image: ${{ parameters.dockerImgTag }}
+    scanType: 'local'
+    customFlags: '--direct-cc --dockerfull'
+    windowsScannerVersion: 'Artifacts'
+    registerCompliant: true
+    registry: ${{ parameters.dockerRegistry }}
+    connection: ${{ parameters.aquaMgmtConsoleConn }}
+  enabled: true

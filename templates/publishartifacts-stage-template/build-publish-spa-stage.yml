@@ -1,0 +1,50 @@
+##############################################################
+################ NodeJs Package Atrifcats Template ##################
+##############################################################
+
+parameters:
+- name: VMIMAGE
+  default: ''
+- name: enabled_cacheNodeModules
+  default: true
+- name: enabled_cacheCypress
+  default: true
+
+stages: 
+- stage: package_artifacts
+  displayName: Package Builds
+  jobs:
+  - job: package
+    displayName: Package
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}
+    steps:
+        - template: /templates/common-step-template/npm-ci-cache-package-steps.yml@AzurePipelinesTemplateAIR2731  
+          parameters:
+            enabled_cacheNodeModules: ${{ parameters.enabled_cacheNodeModules }}
+            enabled_cacheCypress: ${{ parameters.enabled_cacheCypress }}
+        - task: Npm@1
+          displayName: 'Npm build'
+          inputs:
+            command: custom
+            verbose: false
+            customCommand: 'run build:ci'
+          enabled: true
+
+        - task: CopyFiles@2
+          displayName: 'Copy Files to: $(build.artifactstagingdirectory)'
+          inputs:
+            SourceFolder: 'dist'
+            Contents: '**'
+            TargetFolder: '$(build.artifactstagingdirectory)'
+            CleanTargetFolder: true
+            OverWrite: true
+          enabled: true
+
+        - task: PublishBuildArtifacts@1
+          displayName: 'Publish Artifact:drop'
+          inputs:
+            PathtoPublish: '$(build.artifactstagingdirectory)'
+            ArtifactName: drop
+            ArtifactType: Container
+          enabled: true

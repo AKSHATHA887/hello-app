@@ -1,0 +1,98 @@
+parameters:
+- name: vmImage
+  default: 'windows-2019'
+- name: deployInfraTFLayerFolder
+  default: ''
+- name: artifactName
+  default: ''
+- name: solutionName
+  default: ''
+- name: dotNetCoreVersion
+  default: '3.1.301'
+- name: NuGetVersion
+  default: '4.7.1'
+- name: nuGetServiceConnectionName
+  default: ''  
+
+stages: 
+- stage: build_publish_artifact
+  displayName: Build DotNetCore, package and Publish Artifact
+  jobs:
+  - job: build_publish_artifact
+    displayName: build_publish_artifact
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+      
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Use .NET Core sdk ${{ parameters.dotNetCoreVersion }}'
+      inputs:
+        version: ${{ parameters.dotNetCoreVersion }}
+      enabled: true
+
+    - task: NuGetToolInstaller@1
+      displayName: 'Use NuGet ${{ parameters.NuGetVersion }}'
+      inputs:
+        versionSpec: ${{ parameters.NuGetVersion }}
+        checkLatest: true
+      enabled: true
+
+    - template: /templates/nuget-common/nuget-authenticate-step.yml@AzurePipelinesTemplateAIR2731
+      parameters:
+        nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+
+    - task: DotNetCoreCLI@2
+      displayName: 'dotnet restore'
+      inputs:
+        command: restore
+        projects: ${{ parameters.solutionName }}
+      enabled: true
+
+    - task: NuGetCommand@2
+      displayName: 'NuGet restore'
+      inputs:
+        restoreSolution: ${{ parameters.solutionName }}
+      enabled: false
+
+    - task: VSBuild@1
+      displayName: 'Build solution'
+      inputs:
+        solution: ${{ parameters.solutionName }}
+        msbuildArgs: '/p:outdir=$(build.artifactstagingdirectory)\build'
+        platform: 'any cpu'
+        configuration: release
+      enabled: true
+
+    - task: REBAR-MetadataBuilder.metadatabuilder-rebar-build-release-task.custom-build-release-task.REBAR-Metadata-Builder@0
+      displayName: 'REBAR Metadata Builder - Prod'
+      enabled: true
+
+    - task: REBAR-MetadataBuilder.beta-metadatabuilder-rebar-build-release-task.custom-build-release-task.REBAR-Metadata-Builder@0
+      displayName: 'REBAR Metadata Builder'
+      enabled: false
+
+    - task: ArchiveFiles@2
+      displayName: 'Archive build to build.zip'
+      inputs:
+        rootFolderOrFile: $(build.artifactstagingdirectory)\build\*
+        archiveFile: '$(build.artifactstagingdirectory)\build.zip'
+      enabled: true
+  
+    - task: CopyFiles@2
+      displayName: 'Copy build.zip to infra layer folder'
+      inputs:
+        SourceFolder: $(build.artifactstagingdirectory)
+        Contents: build.zip
+        TargetFolder: $(Build.SourcesDirectory)\${{ parameters.deployInfraTFLayerFolder}}
+      enabled: true
+
+    - task: ArchiveFiles@2
+      displayName: 'Build Pipeline Artifact'
+      inputs:
+        rootFolderOrFile: $(Build.SourcesDirectory)\infra
+        archiveFile: $(build.artifactstagingdirectory)\${{ parameters.artifactName }}-$(build.buildnumber).zip
+      enabled: true
+
+    - publish: $(build.artifactstagingdirectory)\${{ parameters.artifactName }}-$(build.buildnumber).zip
+      artifact: ${{ parameters.artifactName }}
+      enabled: true

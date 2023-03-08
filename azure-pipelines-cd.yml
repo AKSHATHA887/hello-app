@@ -1,0 +1,189 @@
+resources:
+  repositories:
+    - repository: AzurePipelinesTemplateAIR2731
+      type: git
+      name: EnterpriseArchitecture_2641/_git/Azure-Pipelines-Template-AIR2731
+      endpoint: CIO EA Cross Organization Access-EnterpriseArchitecture_2641
+      ref: refs/tags/v1.68
+  pipelines:
+    - pipeline: AutoAPI_AIR200827_CI
+      source: AutoAPI_AIR200827_CI
+      branch: master
+      trigger:
+        branches:
+          include:
+          - master
+
+trigger: none
+
+variables:
+- template: azure-pipelines-common-vars.yml
+- group: cio-cloud-gcp-common-200827-strategy-proof-of-concept
+
+stages:
+
+  # Terraform Plan sbx
+  - template: templates/release-stage-template/gcp-stage-template/tf-plan.yml@AzurePipelinesTemplateAIR2731
+    parameters:
+      gcpEnvName: 'sbx'
+      msHostedPoolVmImage: ${{ variables.VMIMAGE }}
+      artifactName: ${{ variables.ARTIFACT_NAME }}
+      archiveFilePathToExtract: ${{ variables.ARCHIVE_FILE_PATH_TO_EXTRACT }}
+      azureDevOpsVarGroups:
+      - ${{ variables.AZUREDEVOPS_SBX_VAR_GROUP_NAME }}
+      azurermBackendStorageContainer: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER }}
+      azurermBackendStorageContainerBlobKey: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER_BLOB_KEY }}
+      deployInfraTFLayerFolder: ${{ variables.DEPLOY_INFRA_TF_LAYER_FOLDER }}
+      condition: '' 
+      dependsOn: '' 
+      pipelineResourceIdentifier: 'AutoAPI_AIR200827_CI'
+      inputTFVarDefinitionFiles: 
+      - env.tfvars
+      - global.tfvars
+      inputTFVars: []
+      additionalPreSteps: []
+      additionalPostSteps: []
+      tfGraphGenerate: false
+      gcpKey: 'HashicorpVaultEnabled'
+      hashiVaultEnv: 'NPD'
+      airID: ${{ variables.AIR_ID }}
+      gcpProjectName: ${{ variables.GCP_SBX_PROJECT_NAME }}
+
+  # Terraform Apply sbx
+  - template: templates/release-stage-template/gcp-stage-template/tf-apply.yml@AzurePipelinesTemplateAIR2731
+    parameters:
+      gcpEnvName: 'sbx'
+      msHostedPoolVmImage: ${{ variables.VMIMAGE }}
+      artifactName: ${{ variables.ARTIFACT_NAME }}
+      archiveFilePathToExtract: ${{ variables.ARCHIVE_FILE_PATH_TO_EXTRACT }}
+      azureDevOpsVarGroups:
+      - ${{ variables.AZUREDEVOPS_SBX_VAR_GROUP_NAME }}
+      azurermBackendStorageContainer: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER }}
+      azurermBackendStorageContainerBlobKey: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER_BLOB_KEY }}
+      deployInfraTFLayerFolder: ${{ variables.DEPLOY_INFRA_TF_LAYER_FOLDER }}
+      condition: '' 
+      dependsOn: '' 
+      pipelineResourceIdentifier: 'AutoAPI_AIR200827_CI'
+      inputTFVarDefinitionFiles:
+      - env.tfvars
+      - global.tfvars
+      inputTFVars: []
+      additionalPreSteps: []
+      additionalPostSteps: []
+      tfGraphGenerate: false
+      gcpKey: 'HashicorpVaultEnabled'
+      hashiVaultEnv: 'NPD'
+      airID: ${{ variables.AIR_ID }}
+      gcpProjectName: ${{ variables.GCP_SBX_PROJECT_NAME }}
+      azureDevOpsEnvironment: ${{ variables.AZUREDEVOPS_SBX_ENVIRONMENT_NAME }}
+
+#  # Terraform Plan dev
+#  - template: templates/release-stage-template/gcp-stage-template/tf-plan.yml@AzurePipelinesTemplateAIR2731
+#    parameters:
+#      gcpEnvName: 'dev'
+#      msHostedPoolVmImage: ${{ variables.VMIMAGE }}
+#      artifactName: ${{ variables.ARTIFACT_NAME }}
+#      archiveFilePathToExtract: ${{ variables.ARCHIVE_FILE_PATH_TO_EXTRACT }}
+#      azureDevOpsVarGroups:
+#      - ${{ variables.AZUREDEVOPS_DEV_VAR_GROUP_NAME }}
+#      azurermBackendStorageContainer: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER }}
+#      azurermBackendStorageContainerBlobKey: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER_BLOB_KEY }}
+#      deployInfraTFLayerFolder: ${{ variables.DEPLOY_INFRA_TF_LAYER_FOLDER }}
+#      condition: '' 
+#      dependsOn: '' 
+#      pipelineResourceIdentifier: 'AutoAPI_AIR200827_CI'
+#      inputTFVarDefinitionFiles: 
+#      - env.tfvars
+#      - global.tfvars
+#      inputTFVars: []
+#      additionalPreSteps: []
+#      additionalPostSteps: []
+#      tfGraphGenerate: false
+#      gcpKey: 'HashicorpVaultEnabled'
+#      hashiVaultEnv: 'NPD'
+#      airID: ${{ variables.AIR_ID }}
+#      gcpProjectName: ${{ variables.GCP_DEV_PROJECT_NAME }}
+#
+#  # Terraform Apply dev
+#  - template: templates/release-stage-template/gcp-stage-template/tf-apply.yml@AzurePipelinesTemplateAIR2731
+#    parameters:
+#      gcpEnvName: 'dev'
+#      msHostedPoolVmImage: ${{ variables.VMIMAGE }}
+#      artifactName: ${{ variables.ARTIFACT_NAME }}
+#      archiveFilePathToExtract: ${{ variables.ARCHIVE_FILE_PATH_TO_EXTRACT }}
+#      azureDevOpsVarGroups:
+#      - ${{ variables.AZUREDEVOPS_DEV_VAR_GROUP_NAME }}
+#      azurermBackendStorageContainer: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER }}
+#      azurermBackendStorageContainerBlobKey: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER_BLOB_KEY }}
+#      deployInfraTFLayerFolder: ${{ variables.DEPLOY_INFRA_TF_LAYER_FOLDER }}
+#      condition: '' 
+#      dependsOn: '' 
+#      pipelineResourceIdentifier: 'AutoAPI_AIR200827_CI'
+#      inputTFVarDefinitionFiles:
+#      - env.tfvars
+#      - global.tfvars
+#      inputTFVars: []
+#      additionalPreSteps: []
+#      additionalPostSteps: []
+#      tfGraphGenerate: false
+#      gcpKey: 'HashicorpVaultEnabled'
+#      hashiVaultEnv: 'NPD'
+#      airID: ${{ variables.AIR_ID }}
+#      gcpProjectName: ${{ variables.GCP_DEV_PROJECT_NAME }}
+#      azureDevOpsEnvironment: ${{ variables.AZUREDEVOPS_DEV_ENVIRONMENT_NAME }}
+#
+#  # Terraform Plan test
+#  - template: templates/release-stage-template/gcp-stage-template/tf-plan.yml@AzurePipelinesTemplateAIR2731
+#    parameters:
+#      gcpEnvName: 'test'
+#      msHostedPoolVmImage: ${{ variables.VMIMAGE }}
+#      artifactName: ${{ variables.ARTIFACT_NAME }}
+#      archiveFilePathToExtract: ${{ variables.ARCHIVE_FILE_PATH_TO_EXTRACT }}
+#      azureDevOpsVarGroups:
+#      - ${{ variables.AZUREDEVOPS_TEST_VAR_GROUP_NAME }}
+#      azurermBackendStorageContainer: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER }}
+#      azurermBackendStorageContainerBlobKey: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER_BLOB_KEY }}
+#      deployInfraTFLayerFolder: ${{ variables.DEPLOY_INFRA_TF_LAYER_FOLDER }}
+#      condition: '' 
+#      dependsOn: '' 
+#      pipelineResourceIdentifier: 'AutoAPI_AIR200827_CI'
+#      inputTFVarDefinitionFiles: 
+#      - env.tfvars
+#      - global.tfvars
+#      inputTFVars: []
+#      additionalPreSteps: []
+#      additionalPostSteps: []
+#      tfGraphGenerate: false
+#      gcpKey: 'HashicorpVaultEnabled'
+#      hashiVaultEnv: 'NPD'
+#      airID: ${{ variables.AIR_ID }}
+#      gcpProjectName: ${{ variables.GCP_TEST_PROJECT_NAME }}
+#
+#  # Terraform Apply test
+#  - template: templates/release-stage-template/gcp-stage-template/tf-apply.yml@AzurePipelinesTemplateAIR2731
+#    parameters:
+#      gcpEnvName: 'test'
+#      msHostedPoolVmImage: ${{ variables.VMIMAGE }}
+#      artifactName: ${{ variables.ARTIFACT_NAME }}
+#      archiveFilePathToExtract: ${{ variables.ARCHIVE_FILE_PATH_TO_EXTRACT }}
+#      azureDevOpsVarGroups:
+#      - ${{ variables.AZUREDEVOPS_TEST_VAR_GROUP_NAME }}
+#      azurermBackendStorageContainer: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER }}
+#      azurermBackendStorageContainerBlobKey: ${{ variables.AZURERM_BACKEND_STORAGE_CONTAINER_BLOB_KEY }}
+#      deployInfraTFLayerFolder: ${{ variables.DEPLOY_INFRA_TF_LAYER_FOLDER }}
+#      condition: '' 
+#      dependsOn: '' 
+#      pipelineResourceIdentifier: 'AutoAPI_AIR200827_CI'
+#      inputTFVarDefinitionFiles:
+#      - env.tfvars
+#      - global.tfvars
+#      inputTFVars: []
+#      additionalPreSteps: []
+#      additionalPostSteps: []
+#      tfGraphGenerate: false
+#      gcpKey: 'HashicorpVaultEnabled'
+#      hashiVaultEnv: 'NPD'
+#      airID: ${{ variables.AIR_ID }}
+#      gcpProjectName: ${{ variables.GCP_TEST_PROJECT_NAME }}
+#      azureDevOpsEnvironment: ${{ variables.AZUREDEVOPS_TEST_ENVIRONMENT_NAME }}
+

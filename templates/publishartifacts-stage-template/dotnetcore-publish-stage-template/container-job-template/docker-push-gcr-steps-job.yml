@@ -1,0 +1,29 @@
+parameters:
+- name: GOOGLE_CONTAINER_REGISTRY
+  default: ''
+- name: FULL_DIST_IMAGE_TO_PUSH
+  default: ''
+# jobs:
+# - job: docker_push_gcr_scan
+steps:
+  # Login into GCR to upload docker image
+  - task: Docker@2
+    displayName: Login to GCR
+    inputs:
+      containerRegistry: ${{ parameters.GOOGLE_CONTAINER_REGISTRY }}
+      dockerRegistryConnection: ${{ parameters.GOOGLE_CONTAINER_REGISTRY }}
+      command: 'login'
+    enabled: true
+
+  # Push docker image into GCR
+  - script: docker push ${{ parameters.FULL_DIST_IMAGE_TO_PUSH }}
+    displayName: 'Push ${{ parameters.FULL_DIST_IMAGE_TO_PUSH }} image'
+    enabled: true
+
+  # Logout from GCR
+  - task: Docker@2
+    displayName: Logout from GCR
+    inputs:
+      containerRegistry: ${{ parameters.GOOGLE_CONTAINER_REGISTRY }}
+      command: 'logout'
+    enabled: true

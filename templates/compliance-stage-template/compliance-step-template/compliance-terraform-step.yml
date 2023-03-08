@@ -1,0 +1,156 @@
+parameters:
+- name: deployInfraTFLayerFolder
+  default: ''
+- name: enableTFFormat
+  type: boolean
+  default: true
+- name: enableTFModPromoteScan
+  type: boolean
+  default: false
+
+steps:
+- task: CIODevOps.azuredevOps-build-agent-cf-cli-config-file-generator.custom-build-release-task.AzureDevOps Build Agent TF Cli Config File Generator@0
+  displayName: 'AzureDevOps Build Agent TF Cli Config File Generator'
+  enabled: true
+
+- task: Powershell@2
+  displayName: Prepare for Terraform Registries
+  continueOnError: false
+  timeoutInMinutes: 2  
+  inputs:
+    targetType: inline
+    script: |
+      Write-Host "[Debug]Agent OS is: $env:AGENT_OS"
+      # For Windows Build Agentww
+      if ($env:AGENT_OS -match '^.*Windows.*$') {
+          Write-Host "[Debug]...........Windows Agent Detected........"
+          if (Test-Path "$($env:APPDATA)/terraform.rc") {
+            $oriTfRcFilePath = "$($env:APPDATA)/terraform.rc"
+            $oriTfRcStr = Get-Content "$oriTfRcFilePath" -Raw
+            $oriTfRcStr = $oriTfRcStr -replace "acnciotfregistry.accenture.com", "acnciotfregistry.ciostage.accenture.com"
+            Add-Content $oriTfRcFilePath "`n $oriTfRcStr"
+          }
+      # For Linux Build Agent
+      } ElseIf ($env:AGENT_OS -match '^.*Linux.*$') {
+          Write-Host "[Debug]...........Linux Agent Detected........"
+          if (Test-Path "~/.terraformrc") {
+            $oriTfRcFilePath = "~/.terraformrc"
+            $oriTfRcStr = Get-Content "$oriTfRcFilePath" -Raw
+            $oriTfRcStr = $oriTfRcStr -replace "acnciotfregistry.accenture.com", "acnciotfregistry.ciostage.accenture.com"
+            Add-Content $oriTfRcFilePath "`n $oriTfRcStr"
+          }
+      } else {
+          Write-Error "[Error]*********Agent OS is neither Windows nor Linux: $env:AGENT_OS **********"
+      }
+  enabled: true 
+
+- ${{ if eq(parameters.enableTFFormat, true) }}:
+  - task: Powershell@2
+    displayName: Terraform Format
+    name: tf_fmt
+    continueOnError: false
+    timeoutInMinutes: 2  
+    inputs:
+      targetType: inline
+      script: |
+        cd ${{ parameters.deployInfraTFLayerFolder}}
+        $cmdArgs = @(
+            "fmt"
+            "--diff=true"
+            "-check=true"
+            "./"
+          )
+        terraform $cmdArgs
+      failOnStderr: true # Optional
+    enabled: true
+
+- task: Powershell@2
+  displayName: Terraform Validate
+  name: tf_validate
+  continueOnError: false
+  timeoutInMinutes: 2
+  inputs:
+    targetType: inline
+    script: |
+      cd ${{ parameters.deployInfraTFLayerFolder}}
+      $Env:AWS_DEFAULT_REGION="us-east-1"
+      $initCmdArgs = @(
+        "init"
+        "-backend=false"
+      )
+      terraform $initCmdArgs
+
+      $validateCmdArgs = @(
+        "validate"
+        "-no-color"
+      )
+      terraform $validateCmdArgs
+    failOnStderr: true # Optional
+  enabled: true
+
+- task: PowerShell@2
+  name: compliance_test
+  displayName: 'Terraform Compliance Test'
+  inputs:
+    targetType: inline
+    script: |
+      # Comment out as Pester already backed in the job container - Gerome 10/30/2020
+      Install-Module -Name Pester -Force -Verbose -Scope CurrentUser -RequiredVersion 4.10.1
+      # Execute Pester Test, write results as NUnit to publish into the build
+      Get-ChildItem /sharedfolder
+      $scriptHome = $null
+      if (Test-Path -Path "/sharedfolder/test") {
+        $scriptHome = "/sharedfolder/test"
+      } elseif (Test-Path -Path "/sharedfolder/5064-tfmod-compliance-test"){
+        $scriptHome = "/sharedfolder/5064-tfmod-compliance-test"
+      }
+      if ($null -eq $scriptHome){
+        Write-Error "Cannot find compliance test cases ps1"
+      } else {
+        Write-Host "scriptHome is $scriptHome"
+        Get-ChildItem $scriptHome
+      }
+      $result = Invoke-Pester -Script (Join-Path "$scriptHome" "moduleconsume-tf12.ps1") `
+        -OutputFormat 'NUnitXML' -OutputFile (Join-Path $Env:COMMON_TESTRESULTSDIRECTORY 'workspace.parameters.tests.xml') `
+        -PassThru
+      $result.TestResult | Where-Object { $_.Result -eq 'Failed' -or $_.Result -eq 'Pending' } | ForEach-Object {
+        $test = $_
+        switch ($test.Result) {
+          'Failed' {
+            $msg = "$($test.Describe) | $($test.Context) | $($test.Name) | $($test.FailureMessage)"
+            $line = ""
+            $file = ""
+            if ($test.StackTrace -Match '<ScriptBlock>,\s*(?<file>.+(?<=\.ps1)):\s*line\s*(?<line>\d+)') {
+              $line = $Matches.line
+              $file = $Matches.file
+            }
+            Write-Error "Compliance tests failed : $msg"
+            break;
+          }
+          'Pending' {
+            $msg = "$($test.Describe) | $($test.Context) | $($test.Name) : Is Pending Implementation"
+            Write-Warning "Compliance tests has few warning : $msg" 
+            break;
+          }
+        }
+      }
+      if ($result.FailedCount -gt 0) {
+        exit $result.FailedCount
+      }
+  enabled: true
+
+- ${{ if eq(parameters.enableTFModPromoteScan, true) }}:
+  - task: CIODevOps.cloud2-tfmod-consume-build-release-task.custom-build-release-task.Cloud2.0 Terraform Module Promote Assistant@0
+    displayName: 'Cloud Terraform Module Promote Scan'
+    enabled: true
+
+- task: PublishTestResults@2
+  condition: succeededOrFailed()
+  name: publish_compliance_results
+  displayName: Publish Compliance Test Result
+  inputs:
+    testResultsFormat: NUnit
+    testResultsFiles: "*.xml"
+    testRunTitle: "Compliance Test"
+    searchFolder: $(Common.TestResultsDirectory)
+  enabled: true

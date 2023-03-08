@@ -1,0 +1,21 @@
+parameters:
+- name: nodeJSVer
+  default: '10.x'
+
+steps:   
+    - task: NodeTool@0
+      displayName: 'Install Nodejs ${{ parameters.nodeJSVer }}'
+      inputs:
+          versionSpec: ${{ parameters.nodeJSVer }}
+    - task: Npm@1
+      displayName: 'Install Application Dependencies'
+      inputs:
+        workingDir: '$(System.DefaultWorkingDirectory)'
+        verbose: false
+    - task: Npm@1
+      displayName: 'Build Application'
+      inputs:
+        command: custom
+        workingDir: '$(System.DefaultWorkingDirectory)'
+        verbose: false
+        customCommand: 'run build --if-present'

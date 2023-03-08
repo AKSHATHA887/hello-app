@@ -1,0 +1,21 @@
+parameters:
+  - name: vmImage
+    default: 'ubuntu-latest'
+  - name: startupSleepTime
+    default: 30
+  - name: nodeJSVer
+    default: '10.x'
+  - name: azfuncDefaultPort
+    default: '7071'
+
+stages:
+  - stage: "smoke_test"
+    displayName: "Smoke Test Azure function"
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    jobs:
+    - template: /templates/validation-stage-template/nodejs-smoketest-job-template/azurefunc-smoketest-job.yml@AzurePipelinesTemplateAIR2731
+      parameters:
+        azfuncDefaultPort: ${{ parameters.azfuncDefaultPort }} 
+        nodeJSVer: ${{ parameters.nodeJSVer }} 
+        startupSleepTime: ${{ parameters.startupSleepTime }} 

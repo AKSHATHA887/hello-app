@@ -1,0 +1,38 @@
+parameters:
+- name: nodeJSVer
+  default: '10.x' 
+- name: sourceFolder
+  default: '.'
+- name: envName    
+- name: zipFilePath
+- name: deployInfraTfLayerFolder
+- name: artifactName
+
+jobs:
+  - job: 'build_publish_artifact_${{ parameters.envName }}'
+    displayName: 'Creating & Publishing Artifacts for  ${{ parameters.envName }}'
+    steps:
+    - template: /templates/common-step-template/nodejs-install-build-step.yml@AzurePipelinesTemplateAIR2731
+      parameters:
+        nodeJSVer: ${{ parameters.nodeJSVer }} 
+        
+    - task: CopyFiles@2
+      displayName: 'Copy Files to: $(build.artifactstagingdirectory) - ${{ parameters.envName }} '
+      inputs:
+        SourceFolder: '${{ parameters.sourceFolder }}/${{ parameters.envName }}'
+        Contents: ${{ parameters.zipFilePath }} 
+        TargetFolder: '$(Build.SourcesDirectory)/${{ parameters.deployInfraTfLayerFolder}}'
+        CleanTargetFolder: false
+        OverWrite: true
+      enabled: true
+
+    - task: ArchiveFiles@2
+      displayName: 'Archive INFRA_LAYER_FOLDER for ${{ parameters.envName }}'
+      inputs:
+        rootFolderOrFile:  $(Build.SourcesDirectory)/infra
+        archiveFile: '$(Pipeline.Workspace)/${{ parameters.artifactName }}-${{ parameters.envName }}-$(build.buildnumber).zip'
+      enabled: true
+
+    - publish: $(Pipeline.Workspace)/${{ parameters.artifactName }}-${{ parameters.envName }}-$(build.buildnumber).zip
+      artifact: ${{ parameters.artifactName }}-${{ parameters.envName }}
+      enabled: true

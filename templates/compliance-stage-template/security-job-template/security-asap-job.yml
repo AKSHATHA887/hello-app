@@ -1,0 +1,12 @@
+parameters:
+- name: AIR_ID
+  default: ''
+- name: ASAP_PROJECT_ID
+  default: ''
+
+steps:
+- task: CIODevOps.asapsecurityscan-build-release-task.custom-build-release-task.ASAPSecurityScanTask@0
+  displayName: ASAPSecurityScanTask
+  inputs:
+    asapfields: true
+    air_id: ${{ parameters.AIR_ID }}

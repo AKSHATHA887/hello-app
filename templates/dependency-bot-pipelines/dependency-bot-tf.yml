@@ -1,0 +1,184 @@
+parameters:
+# used to query for current iteration
+- name: 'azure_devops_team_name'
+  type: string
+  default: ''
+# used for raising PRs against target repository
+- name: 'azure_devops_repository'
+  type: string
+  default: ''
+# used for raising PRs against target organization
+- name: 'azure_devops_organization'
+  type: string
+  default: ''
+# used for raising PRs against target PROJECT
+- name: 'azure_devops_project'
+  type: string
+  default: ''
+# used for raising PRs against target PROJECT
+- name: 'azure_devops_area'
+  type: string
+  default: ''
+# used for raising PRs against target (e.g. we start from this branch, and merge back into it)
+- name: 'source_branch'
+  type: string
+  default: 'master'
+# used to clean any previous dependency-bot artifacts (PRs and or branches) 
+- name: 'delete_previous_bot_prs_branches'
+  type: string
+  default: 'false'
+# used as path argument for where to scan files
+- name: 'tf_path'
+  type: string
+  default: 'infra/*'
+# pass any required fields to create a bug, semicolon delimited
+# e.g. for "CIO Agile" Azure devops process template use 'scrum_stage found=Build' 
+# multiple values may be specified  'scrum_stage found=Build;my_other_field=value;my_other_other_field=value2'
+- name: 'required_bug_fields_for_process_template'
+  type: string
+  default: ''
+jobs:
+- job: check_and_raise_job
+  displayName: Run DependencyBot and raise PR if needed
+  pool:
+    vmImage: 'ubuntu-latest'
+  steps:
+  - checkout: self
+  - checkout: 5064-tf-dependency-update  
+  - script: echo ${AZURE_DEVOPS_CLI_PAT} | az devops login
+    env:
+      AZURE_DEVOPS_CLI_PAT: $(System.AccessToken)
+    displayName: 'Login Azure DevOps Extension'
+  - ${{ if eq(parameters.delete_previous_bot_prs_branches, 'true') }}:
+    - script: |
+              az repos pr list --organization $ORG --project "$PROJECT"  --repository $REPO --status "active" \
+                --query "[?contains(sourceRefName, 'refs/heads/bot/tf/')].pullRequestId" | jq .[] | xargs -L1 -I'{}' az repos pr update --id {} --org $ORG --status abandoned
+      displayName: 'Clean Pull Requests from previous DependencyBot execution'
+      continueOnError: true
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        TEAM_NAME: ${{ parameters.azure_devops_team_name }}
+        REPO: ${{ parameters.azure_devops_repository }}
+        ORG: ${{ parameters.azure_devops_organization }}
+        PROJECT: ${{ parameters.azure_devops_project }}
+
+    - script: |
+              if [ -n "$SYSTEM_ACCESSTOKEN" ]; then 
+                echo ${SYSTEM_ACCESSTOKEN} | az devops login
+                az extension add --name azure-devops
+                git config user.name "${TEAM_NAME}-BOT" 
+                git config user.email "CIO.EA.AppArch.Teams.OperationsAndEngineering@accenture.com"
+                git config http.extraheader "AUTHORIZATION: bearer $SYSTEM_ACCESSTOKEN" 
+              fi
+              git branch -r --list 'origin/bot/tf/*' | sed "s/origin\///" | xargs -I {} git push origin --delete {}
+      displayName: 'Clean Branches from previous DependencyBot execution'
+      continueOnError: true
+      workingDirectory: $(Build.SourcesDirectory)/${{ parameters.azure_devops_repository }}
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        TEAM_NAME: ${{ parameters.azure_devops_team_name }}
+
+  - task: CIODevOps.azuredevOps-build-agent-cf-cli-config-file-generator.custom-build-release-task.AzureDevOps Build Agent TF Cli Config File Generator@1
+    displayName: 'AzureDevOps Build Agent TF Cli Config File Generator'
+
+  - script: |
+        echo "Scanning $TF_PATH"
+        export REG_HOST="https://acnciotfregistry.accenture.com"
+        export REG_JWT=$(grep -o 'token = [^,]*' ~/.terraformrc | awk -F= '$1=="token "{print $2}' | xargs echo -n | tr -d '\r') 
+        chmod a+x $(Build.SourcesDirectory)/5064-tf-dependency-update/bin/linux/tf-dependency-update
+        $(Build.SourcesDirectory)/5064-tf-dependency-update/bin/linux/tf-dependency-update $TF_PATH
+    displayName: 'Check for new TF modules'
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.azure_devops_repository }}
+    continueOnError: true
+    env:
+      TF_PATH: ${{ parameters.tf_path }}
+    enabled: true
+
+  - script: |
+        # query for current iteration name
+        CURRENT_ITERATION=$(az boards iteration team list --team "$TEAM_NAME" | jq -rc ' .[] | select (.attributes .timeFrame | contains("current")) | .name' | sed -e 's/ /-/g')
+        echo $CURRENT_ITERATION
+        CURRENT_ITERATION_PATH=$(az boards iteration team list --team "$TEAM_NAME" | jq -rc ' .[] | select (.attributes .timeFrame | contains("current")) | .path')
+        echo $CURRENT_ITERATION_PATH
+        AREA=$(az boards area team list --team "$TEAM_NAME" --org $ORG --project $PROJECT | jq -rc ' .defaultValue')
+        echo $AREA
+        NOW=$(date +"%d-%b-%Y")
+        mkdir -p $NOW
+        MERGE_BRANCH="dependencybot-update-tf.$NOW-$CURRENT_ITERATION"
+        echo "[Debug] print MERGE_BRANCH:"
+        echo $MERGE_BRANCH
+
+        echo ${SYSTEM_ACCESSTOKEN}
+        
+        if [ -n "$SYSTEM_ACCESSTOKEN" ]; then 
+            echo ${SYSTEM_ACCESSTOKEN} | az devops login
+            az extension add --name azure-devops
+            git config user.name "${TEAM_NAME}-BOT" 
+            git config user.email "CIO.EA.AppArch.Teams.OperationsAndEngineering@accenture.com"
+            git config http.extraheader "AUTHORIZATION: bearer $SYSTEM_ACCESSTOKEN" 
+        fi
+        git clean -fd
+        git fetch -p
+
+        # Comment out by Gerome due to failed pipeline error: error: Your local changes to the following files would be overwritten by checkout
+        #git checkout $SOURCE_BRANCH
+        git config http.extraheader "AUTHORIZATION: bearer $SYSTEM_ACCESSTOKEN" pull
+        git checkout -b bot/tf/$MERGE_BRANCH
+        
+        # merging the updated .tf into this MERGE_BRANCH
+        
+        if [[ `git status --porcelain` ]]; then
+            echo "[Debug] updates found."
+            git add -A
+            git commit -m "$MERGE_BRANCH"
+            git push origin bot/tf/$MERGE_BRANCH
+
+            BUILD_LINK=$(echo -e "${ORG}${PROJECT}/_build/results?buildId=${BUILD_BUILDID}&view=artifacts&type=publishedArtifacts")
+            command="az boards work-item create --type Bug --title \"dependency-bot: ${REPO}\" --fields"
+
+            # make BUG_FIELDS dynamic, semicolon separated 
+            #     BUG_FIELDS="scrum_stage found=Build;mytitle=val"
+
+            if [ -n "$BUG_FIELDS" ]; then 
+              echo "[debug] BUG_FIELDS is not empty" 
+              IFS=';'; arrIN=($BUG_FIELDS); unset IFS;
+              for bug_field in "${arrIN[@]}"; do  
+                command+=' "'
+                command+=$bug_field
+                command+='" '
+              done
+              command+=" --org ${ORG} --project ${PROJECT} --area \"${AREA}\" --iteration \"${CURRENT_ITERATION_PATH}\" --discussion ${BUILD_LINK}"
+              WORK_ITEM=$(eval $command | jq '.id')
+              echo "[Debug] print WORK_ITEM:"
+              echo $WORK_ITEM
+              PR_ID=$(az repos pr create --source-branch refs/heads/bot/tf/$MERGE_BRANCH --target-branch $SOURCE_BRANCH --org $ORG \
+                  --project $PROJECT --repository $REPO --transition-work-items true --delete-source-branch true --auto-complete false \
+                  --title $MERGE_BRANCH --description "$BUILD_LINK" --work-items $WORK_ITEM \
+                  | jq '.pullRequestId')
+              echo $PR_ID
+            else 
+              echo "[debug] BUG_FIELDS is empty" 
+              PR_ID=$(az repos pr create --source-branch refs/heads/bot/tf/$MERGE_BRANCH --target-branch $SOURCE_BRANCH --org $ORG \
+                  --project $PROJECT --repository $REPO --transition-work-items true --delete-source-branch true --auto-complete false \
+                  --title $MERGE_BRANCH --description "$BUILD_LINK" \
+                  | jq '.pullRequestId')
+              echo $PR_ID
+            fi
+            az repos pr set-vote --id $PR_ID --org $ORG --vote 'approve'
+        else
+          echo "No updates found."
+          echo "##vso[task.logissue type=warning]No updates found."
+          exit 0
+        fi
+
+    displayName: 'Raise PR'
+    continueOnError: true
+    workingDirectory: $(Build.SourcesDirectory)/${{ parameters.azure_devops_repository }}
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      SOURCE_BRANCH: ${{ parameters.source_branch }}
+      TEAM_NAME: ${{ parameters.azure_devops_team_name }}
+      REPO: ${{ parameters.azure_devops_repository }}
+      ORG: ${{ parameters.azure_devops_organization }}
+      PROJECT: ${{ parameters.azure_devops_project }}
+      BUG_FIELDS: ${{ parameters.required_bug_fields_for_process_template }}

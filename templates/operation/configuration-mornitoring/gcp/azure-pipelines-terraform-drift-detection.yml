@@ -1,0 +1,592 @@
+parameters:
+- name: gcpEnv 
+  default: ''
+- name: msHostedPoolVmImage
+  default: ''
+- name: privatePoolName
+  default: ''
+- name: azureDevOpsVarGroups
+  type: object
+  default: []
+- name: gcpCredentialFile
+  default: ''
+- name: azurermBackendStorageContainer
+  default: ''
+- name: azurermBackendStorageContainerBlobKey
+  default: ''
+- name: inputTFVarDefinitionFiles
+  type: object
+  default: []
+- name: inputTFVars
+  type: object
+- name: condition
+  default: ''
+- name: dependsOn
+  default: ''
+- name: additionalPreSteps
+  type: stepList
+  default: []
+- name: additionalPostSteps
+  type: stepList
+  default: []
+- name: workingDirectory 
+  default: ''
+- name: useMultiTFWks
+  type: boolean
+  default: true
+- name: terraformVersion
+  type: string
+  default: ''
+- name: azdoJobContainerImg
+  type: string
+  default: 'tf-container-tf12:latest'
+  values:
+  - 'tf-job-container:latest'
+  - 'tf-container-tf12:latest'
+  - 'tf-container-tf13-gcp:latest'
+  - 'tf-container-tf14-gcp:latest'
+  - 'tf-container-ml-tf14:latest'
+- name: gcpAuthentication
+  default: ''
+- name: gcpKey
+  type: string
+  default: 'AzDoEnabled'
+  values:
+  - 'AzDoEnabled'
+  - 'HashicorpVaultEnabled'
+- name: hashiVaultEnv
+  type: string
+  default: 'UNSET'
+  values:
+  - 'NPD'
+  - 'PRD'
+  - 'UNSET'
+- name: airID
+  type: string
+  default: ''
+- name: gcpProjectName
+  type: string
+  default: ''
+- name: gcpCredentialFileFromVault
+  type: string
+  default: 'gcpLogin.json'
+
+stages:
+- stage: GCP_${{ parameters.gcpEnv }}_TF_drift
+  ${{ if ne(parameters.dependsOn, '') }}:
+    dependsOn: ${{ parameters.dependsOn }}
+  ${{ if ne(parameters.condition, '') }}:
+    condition: ${{ parameters.condition }}
+  ${{ if ne(length(parameters.azureDevOpsVarGroups), 0) }}:
+    variables:
+    - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+      - name: TF_TOOL_PATH
+        value: '$(System.DefaultWorkingDirectory)/tools/bin/tf'
+    - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+      - group: ${{variableGroup}}
+    - ${{ if eq(parameters.hashiVaultEnv, 'NPD') }}:
+      - name: 'hashiVaultSecretEnv'
+        value: 'nonProd'
+    - ${{ if eq(parameters.hashiVaultEnv, 'PRD') }}:
+      - name: 'hashiVaultSecretEnv'
+        value: 'prod'
+  jobs:
+  - job: GCP_${{ parameters.gcpEnv }}_TF_drift
+    pool:
+      ${{ if ne(parameters.msHostedPoolVmImage, '') }}:
+        vmImage: ${{ parameters.msHostedPoolVmImage }}
+      ${{ if ne(parameters.privatePoolName, '') }}:
+        name: ${{ parameters.privatePoolName }}
+    container:
+      image: acr5064.azurecr.io/${{ parameters.azdoJobContainerImg }}
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    steps:
+      - checkout: self
+        persistCredentials: true
+
+      - ${{ each step in parameters.additionalPreSteps }}:
+        - ${{ step }}
+
+      - task: Powershell@2
+        displayName: Debug
+        name: Debug
+        continueOnError: false
+        timeoutInMinutes: 2  
+        inputs:
+          targetType: inline
+          script: |
+            Get-ChildItem
+            Get-ChildItem Env:
+          failOnStderr: true
+        enabled: true
+
+      - bash: |
+          inputTFVersion="${{parameters.terraformVersion}}"
+          if [ ! -z "$inputTFVersion" ]; then
+            echo "Downloading terraform from https://releases.hashicorp.com/terraform/${{parameters.terraformVersion}}/terraform_${{parameters.terraformVersion}}_linux_amd64.zip to $(TF_TOOL_PATH)"
+            curl https://releases.hashicorp.com/terraform/${{parameters.terraformVersion}}/terraform_${{parameters.terraformVersion}}_linux_amd64.zip -o terraform.zip --fail --silent --show-error
+            mkdir -p $(TF_TOOL_PATH)
+            unzip -qq terraform.zip -d $(TF_TOOL_PATH) 
+            sudo cp $(TF_TOOL_PATH)/terraform /usr/local/bin/terraform
+            $(TF_TOOL_PATH)/terraform -version
+          else
+            echo "parameter terraformVersion is empty, use the preinstalled terraform version from the job container ${{ parameters.azdoJobContainerImg }}"
+            terraform -version
+          fi
+        displayName: 'Prepare Terraform'
+        workingDirectory: ${{ parameters.workingDirectory }}
+        enabled: true
+
+      - ${{ if eq(parameters.gcpKey, 'AzDoEnabled') }}:
+        - task: DownloadSecureFile@1
+          displayName: 'Download GCP credential file'
+          inputs:
+            secureFile: ${{ parameters.gcpCredentialFile }}
+          enabled: true
+
+      - task: CIODevOps.azuredevOps-build-agent-cf-cli-config-file-generator.custom-build-release-task.AzureDevOps Build Agent TF Cli Config File Generator@0
+        displayName: 'AzureDevOps Build Agent TF Cli Config File Generator'
+        enabled: true
+
+      - task: Powershell@2
+        displayName: Terraform Init
+        name: tf_init
+        continueOnError: false
+        timeoutInMinutes: 2
+        inputs:
+          targetType: inline
+          script: |
+            Get-ChildItem
+            Write-Host "[Debug] TF_TOOL_PATH is $(TF_TOOL_PATH)"
+
+            if ("${{ parameters.privatePoolName }}" -ne "") {
+              mkdir -p .terraform/plugins/linux_amd64
+              Invoke-WebRequest -Uri "https://github.com/gavinbunney/terraform-provider-kubectl/releases/download/v1.5.0/terraform-provider-kubectl-linux-amd64" -OutFile ${{ parameters.workingDirectory }}/.terraform/plugins/linux_amd64/terraform-provider-kubectl_v1.11.3_x4
+              chmod 755 ${{ parameters.workingDirectory }}/.terraform/plugins/linux_amd64/terraform-provider-kubectl_v1.11.3_x4
+            } else {
+              Write-Host "[Info] Skip downloading terraform kubectl provider due to parameter privatePoolName with empty value"
+            }
+            #Copy-Item $(Agent.TempDirectory)/${{ parameters.gcpCredentialFile }} ./keyfile.json 
+            Get-ChildItem
+            $cmdArgs = @(
+                "init"
+                "-no-color"
+                "-backend-config=`"storage_account_name=sa5064iactf`""
+                "-backend-config=`"container_name=${{ parameters.azurermBackendStorageContainer }}`""
+                "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+                "./"
+              )
+            Write-Host  $cmdArgs 
+
+            if ("${{ parameters.terraformVersion }}" -ne "") {
+              Write-Host "[Debug] Using terraform version from input ${{ parameters.terraformVersion }}"
+              $(TF_TOOL_PATH)/terraform --version
+              $(TF_TOOL_PATH)/terraform $cmdArgs
+            } else {
+              Write-Host "[Debug] Using terraform within job image"
+              terraform --version
+              terraform $cmdArgs
+            }
+
+          failOnStderr: true # Optional
+          workingDirectory: ${{ parameters.workingDirectory }}
+        env:
+          ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY)   
+        enabled: true
+
+      - ${{ if eq(parameters.useMultiTFWks, true) }}:
+        - bash: |
+            inputTFVersion="${{parameters.terraformVersion}}"
+            if [ ! -z "$inputTFVersion" ]; then
+              echo "[Debug] Using terraform version from input ${{ parameters.terraformVersion }}"
+              $(TF_TOOL_PATH)/terraform workspace select ${{ parameters.gcpEnv }} || $(TF_TOOL_PATH)/terraform workspace new ${{ parameters.gcpEnv }} 
+              $(TF_TOOL_PATH)/terraform workspace list -no-color 
+
+              Write-Host "test terraform state pull 1"
+              $(TF_TOOL_PATH)/terraform state pull
+            else
+              echo "[Debug] Using terraform within job image"
+              terraform workspace select ${{ parameters.gcpEnv }} || terraform workspace new ${{ parameters.gcpEnv }} 
+              terraform workspace list -no-color 
+
+              Write-Host "test terraform state pull 2"
+              terraform state pull
+            fi        
+          displayName: 'Terraform Use Workspace'
+          workingDirectory: ${{ parameters.workingDirectory }}
+          env:
+            ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY) 
+          enabled: true
+
+      - task: qetza.replacetokens.replacetokens-task.replacetokens@3
+        displayName: 'Replace tokens in tfvars for specific environment'
+        inputs:
+          rootDirectory: ${{ parameters.workingDirectory }}
+          targetFiles: |
+           **/*.tfvars
+        enabled: true
+
+      - ${{ if eq(parameters.gcpKey, 'HashicorpVaultEnabled') }}:
+        - task: CIODevOps.hashicorp-vault-build-release-task-prd.custom-build-release-task.HashiVaultExt@0
+          name: hashi_vault_credentials
+          displayName: 'HashiCorp Vault Credentials'
+          inputs:
+            HashiEndpoint: '${{ parameters.airID }}-${{ parameters.hashiVaultEnv }}-HashiVault'
+            return: 'secret'
+            secretEnv: '$(hashiVaultSecretEnv)'
+            engineType: 'gcp'
+            gcpRoleSetName: '${{ parameters.gcpProjectName }}-k'
+
+      - task: Powershell@2
+        displayName: Terraform Plan
+        name: tf_plan_in_wks
+        continueOnError: false
+        timeoutInMinutes: 60
+        inputs:
+          targetType: inline
+          script: |
+            if ("${{ parameters.privatePoolName }}" -ne "") {
+              mkdir -p .terraform/plugins/linux_amd64
+              Invoke-WebRequest -Uri "https://github.com/gavinbunney/terraform-provider-kubectl/releases/download/v1.5.0/terraform-provider-kubectl-linux-amd64" -OutFile ${{ parameters.workingDirectory }}/.terraform/plugins/linux_amd64/terraform-provider-kubectl_v1.11.3_x4
+              chmod 755 ${{ parameters.workingDirectory }}/.terraform/plugins/linux_amd64/terraform-provider-kubectl_v1.11.3_x4
+            } else {
+              Write-Host "[Info] Skip downloading terraform kubectl provider due to parameter privatePoolName with empty value"
+            }
+            
+            Get-ChildItem
+            if ("${{ parameters.gcpKey }}" -eq "AzDoEnabled") {
+              Write-Host "[Debug] parameters.gcpKey is ${{ parameters.gcpKey }}"
+              Copy-Item $(Agent.TempDirectory)/${{ parameters.gcpCredentialFile }} ./keyfile.json 
+              $GCP_CRED="$(Agent.TempDirectory)/${{ parameters.gcpCredentialFile }}"
+              Write-Output ("##vso[task.setvariable variable=GCP_CRED;]$GCP_CRED")
+              $Env:GCP_CRED = "$GCP_CRED"
+            } else {
+              Write-Host "[Debug] List files under Build Sources Directory"
+              Get-ChildItem $(Build.SourcesDirectory)
+
+              Write-Host "[Debug] List files under D:/ref/gcp"
+              $TF_GCP_CRED_FILE_Hashi_OUTPUT = Join-Path $(Build.SourcesDirectory) "/D:/ref/gcp"
+              Get-ChildItem $TF_GCP_CRED_FILE_Hashi_OUTPUT
+
+              $TF_GCP_CRED_FILE = Join-Path $(Build.SourcesDirectory) "/D:/ref/gcp/${{ parameters.gcpCredentialFileFromVault }}"
+              Copy-Item $TF_GCP_CRED_FILE ./keyfile.json 
+              Write-Output ("##vso[task.setvariable variable=GCP_CRED;]$TF_GCP_CRED_FILE")
+              $Env:GCP_CRED = "$TF_GCP_CRED_FILE"
+            }
+            Get-ChildItem
+
+            $cmdArgs = @(
+                "init"
+                "-no-color"
+                "-backend-config=`"storage_account_name=sa5064iactf`""
+                "-backend-config=`"container_name=${{ parameters.azurermBackendStorageContainer }}`""
+                "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+                "./"
+              )
+            Write-Host  $cmdArgs 
+            
+            if ("${{ parameters.terraformVersion }}" -ne "") {
+              Write-Host "[Debug] Using terraform version from input ${{ parameters.terraformVersion }}"
+              $(TF_TOOL_PATH)/terraform --version
+              $(TF_TOOL_PATH)/terraform $cmdArgs
+            } else {
+              Write-Host "[Debug] Using terraform within job image"
+              terraform --version
+              terraform $cmdArgs
+            }
+  
+            Get-ChildItem
+  
+            $cmdArgs = @(
+                "plan"
+                "-input=false"
+                "-out"
+                "`"tfplan.bin`""
+                "-no-color"
+            )
+  
+            # Handle terraform variable definitions (.tfvars) files
+            $inputTFVarDefinitionFiles = "${{ join(';', parameters.inputTFVarDefinitionFiles) }}"
+            if (![string]::IsNullOrEmpty($inputTFVarDefinitionFiles)) {
+                $inputTFVarDefinitionFiles.Split(";") | ForEach {
+                  if (![string]::IsNullOrEmpty($_)) {
+                    $cmdArgs += -join('-var-file=', '"', $_, '"')
+                  }
+                }
+            } else {
+              Write-Host "inputTFVarDefinitionFiles is empty -> $TfVarFiles"
+            }
+  
+            # Handle variables on the Command Line
+            $inputTFVars = "${{ join(';', parameters.inputTFVars) }}"
+            if (![string]::IsNullOrEmpty($inputTFVars)) {
+                $inputTFVars.Split(";") | ForEach {
+                  if (![string]::IsNullOrEmpty($_)) {
+                    $cmdArgs += -join('-var=', '"', $_, '"')
+                  }
+                }
+            } else {
+              Write-Host "inputTFVars is empty -> $TfVarFiles"
+            }
+  
+            Write-Host  $cmdArgs
+  
+            if ("${{ parameters.terraformVersion }}" -ne "") {
+              Write-Host "[Debug] Using terraform version from input ${{ parameters.terraformVersion }}"
+              $(TF_TOOL_PATH)/terraform --version
+              $(TF_TOOL_PATH)/terraform $cmdArgs
+            } else {
+              Write-Host "[Debug] Using terraform within job image"
+              terraform --version
+              terraform $cmdArgs
+            }
+            
+            Write-Host "Start to parse tfplan binary file to json"
+
+            if ("${{ parameters.terraformVersion }}" -ne "") {
+              Write-Host "[Debug] Using terraform version from input ${{ parameters.terraformVersion }}"
+              $IsTF11 = ($(TF_TOOL_PATH)/terraform --version | Out-String) -match 'v0.11'
+              Write-Host "[Debug] IsTF11 is $IsTF11"
+              if ($IsTF11) {
+                  tfjson tfplan.bin 
+                  tfjson tfplan.bin >> tfplan.json
+              } else {
+                  terraform show -json tfplan.bin > tfplan.json
+              }
+            } else {
+              Write-Host "[Debug] Using terraform within job image"
+              $IsTF11 = (terraform --version | Out-String) -match 'v0.11'
+              Write-Host "[Debug] IsTF11 is $IsTF11"
+              if ($IsTF11) {
+                  tfjson tfplan.bin 
+                  tfjson tfplan.bin >> tfplan.json
+              } else {
+                  terraform show -json tfplan.bin > tfplan.json
+              }
+            }
+          failOnStderr: true
+          workingDirectory: ${{ parameters.workingDirectory }}
+        env:
+          ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY)
+        enabled: true
+  
+      - publish: ${{ parameters.workingDirectory }}/tfplan.bin
+        artifact: tfplan.bin
+        enabled: true
+
+      - publish: ${{ parameters.workingDirectory }}/tfplan.json
+        artifact: tfplan.json
+        enabled: true
+
+      - task: PowerShell@2
+        displayName: Terraform Drift Detection
+        name: tf_drift
+        continueOnError: false
+        timeoutInMinutes: 2
+        inputs:
+          targetType: inline
+          script: |
+            Get-ChildItem
+            if ("${{ parameters.privatePoolName }}" -ne "") {
+              mkdir -p .terraform/plugins/linux_amd64
+              Invoke-WebRequest -Uri "https://github.com/gavinbunney/terraform-provider-kubectl/releases/download/v1.5.0/terraform-provider-kubectl-linux-amd64" -OutFile ${{ parameters.workingDirectory }}/.terraform/plugins/linux_amd64/terraform-provider-kubectl_v1.11.3_x4
+              chmod 755 ${{ parameters.workingDirectory }}/.terraform/plugins/linux_amd64/terraform-provider-kubectl_v1.11.3_x4
+            } else {
+              Write-Host "[Info] Skip downloading terraform kubectl provider due to parameter privatePoolName with empty value"
+            }
+            
+            Get-ChildItem
+            if ("${{ parameters.gcpKey }}" -eq "AzDoEnabled") {
+              Write-Host "[Debug] parameters.gcpKey is ${{ parameters.gcpKey }}"
+              Copy-Item $(Agent.TempDirectory)/${{ parameters.gcpCredentialFile }} ./keyfile.json 
+              $GCP_CRED="$(Agent.TempDirectory)/${{ parameters.gcpCredentialFile }}"
+              Write-Output ("##vso[task.setvariable variable=GCP_CRED;]$GCP_CRED")
+              $Env:GCP_CRED = "$GCP_CRED"
+            } else {
+              $TF_GCP_CRED_FILE = Join-Path $(Build.SourcesDirectory) "/D:/ref/gcp/${{ parameters.gcpCredentialFileFromVault }}"
+              Copy-Item $TF_GCP_CRED_FILE ./keyfile.json 
+
+              Write-Host "[Debug] List files under Build Sources Directory"
+              Get-ChildItem $(Build.SourcesDirectory)
+
+              Write-Host "[Debug] List files under D:/ref/gcp"
+              $TF_GCP_CRED_FILE_Hashi_OUTPUT = Join-Path $(Build.SourcesDirectory) "/D:/ref/gcp"
+              Get-ChildItem $TF_GCP_CRED_FILE_Hashi_OUTPUT
+
+              $TF_GCP_CRED_FILE = Join-Path $(Build.SourcesDirectory) "/D:/ref/gcp/${{ parameters.gcpCredentialFileFromVault }}"
+              Copy-Item $TF_GCP_CRED_FILE ./keyfile.json 
+              Write-Output ("##vso[task.setvariable variable=GCP_CRED;]$TF_GCP_CRED_FILE")
+              $Env:GCP_CRED = "$TF_GCP_CRED_FILE"
+            }
+            Get-ChildItem
+
+            $cmdArgs = @(
+                "init"
+                "-no-color"
+                "-backend-config=`"storage_account_name=sa5064iactf`""
+                "-backend-config=`"container_name=${{ parameters.azurermBackendStorageContainer }}`""
+                "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+                "./"
+              )
+            Write-Host  $cmdArgs 
+            if ("${{ parameters.terraformVersion }}" -ne "") {
+              Write-Host "[Debug] Using terraform version from input ${{ parameters.terraformVersion }}"
+              $(TF_TOOL_PATH)/terraform --version
+              $(TF_TOOL_PATH)/terraform $cmdArgs
+            } else {
+              Write-Host "[Debug] Using terraform within job image"
+              terraform --version
+              terraform $cmdArgs
+            }
+  
+            Get-ChildItem
+  
+            $cmdArgs = @(
+                "plan"
+                "-detailed-exitcode"
+            )
+  
+            # Handle terraform variable definitions (.tfvars) files
+            $inputTFVarDefinitionFiles = "${{ join(';', parameters.inputTFVarDefinitionFiles) }}"
+            if (![string]::IsNullOrEmpty($inputTFVarDefinitionFiles)) {
+                $inputTFVarDefinitionFiles.Split(";") | ForEach {
+                  if (![string]::IsNullOrEmpty($_)) {
+                    $cmdArgs += -join('-var-file=', '"', $_, '"')
+                  }
+                }
+            } else {
+              Write-Host "inputTFVarDefinitionFiles is empty -> $TfVarFiles"
+            }
+  
+            # Handle variables on the Command Line
+            $inputTFVars = "${{ join(';', parameters.inputTFVars) }}"
+            if (![string]::IsNullOrEmpty($inputTFVars)) {
+                $inputTFVars.Split(";") | ForEach {
+                  if (![string]::IsNullOrEmpty($_)) {
+                    $cmdArgs += -join('-var=', '"', $_, '"')
+                  }
+                }
+            } else {
+              Write-Host "inputTFVars is empty -> $TfVarFiles"
+            }
+  
+            Write-Host $cmdArgs
+
+            if ("${{ parameters.terraformVersion }}" -ne "") {
+              Write-Host "[Debug] Using terraform version from input ${{ parameters.terraformVersion }}"
+              $(TF_TOOL_PATH)/terraform --version
+              $(TF_TOOL_PATH)/terraform $cmdArgs
+            } else {
+              Write-Host "[Debug] Using terraform within job image"
+              terraform --version
+              terraform $cmdArgs
+            }
+
+            Get-ChildItem
+
+            Write-Host "lastexitcode is $lastexitcode"
+
+            switch($lastexitcode)
+            {
+                0  {Write-Host "[Info] No drift detected"; break}
+                1  {Write-Error "There is Error"; break}
+                2  
+                {
+                    Write-Host "[Error] Drift has been detected !!! For Terraform 0.12 and above, please find drift detail in the log and build summary. For Terraform 0.11, please find the drift detail in the log"
+                    
+                    # How to reference lastexitcode from dependent stages: https://docs.microsoft.com/en-us/azure/devops/pipelines/process/deployment-jobs?view=azure-devops#support-for-output-variables
+                    echo "##vso[task.setvariable variable=TFDriftLastExitCode;isOutput=true]$lastexitcode"
+                    
+                    # Upload custom report to build summary for Terraform 0.12 and above ONLY; No report upload for teraform 0.11
+                    $IsTF11 = $False
+                    if ("${{ parameters.terraformVersion }}" -ne "") {
+                      Write-Host "[Debug] Using terraform version from input ${{ parameters.terraformVersion }}"
+                      $IsTF11 = ($(TF_TOOL_PATH)/terraform --version | Out-String) -match 'v0.11'
+                    } else {
+                      Write-Host "[Debug] Using terraform within job image"
+                      $IsTF11 = (terraform --version | Out-String) -match 'v0.11'
+                    }
+
+                    Write-Host "[Debug] IsTF11 is $IsTF11"
+
+                    if (!$IsTF11) {
+                      terraform show -json tfplan.bin > tfplan.json
+                      $tfplanObj = Get-Content tfplan.json | convertfrom-Json
+                      Write-Host "[Debug] test is $tfplanObj"
+                      Write-Host "[Debug] test.resource_changes is $($tfplanObj.resource_changes)"
+                      
+                      # 1. To be created resources
+                      Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">1. To be created resources</div>') -passthru
+                      if (($tfplanObj.resource_changes | ? {$_.change.actions -eq 'create'}) -ne $null) {
+                        $addressOBj = $tfplanObj.resource_changes | ? {$_.change.actions -eq 'create'} | Select -ExpandProperty address
+                        foreach($address in $addressOBj) {
+                          Write-Host "[Debug] address is $address"
+                          $content = -join('<pre>', $address, '</pre>')
+                          Add-Content -Path tfDriftDetectFile2Upload -Value $content -PassThru
+                        }
+                      } else {
+                        Add-Content -Path tfDriftDetectFile2Upload -Value '<pre>N/A</pre>'
+                      }
+                      Add-Content -Path tfDriftDetectFile2Upload -Value ("`r`n") -passthru
+                      
+                      # 2. To be deleted resources
+                      Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">2. To be deleted resources</div>') -passthru
+                      if (($tfplanObj.resource_changes | ? {$_.change.actions -eq 'delete'}) -ne $null) {
+                        $addressOBj = $tfplanObj.resource_changes | ? {$_.change.actions -eq 'delete'} | Select -ExpandProperty address
+                        foreach($address in $addressOBj) {
+                          Write-Host "[Debug] address is $address"
+                          $content = -join('<pre>', $address, '</pre>')
+                          Add-Content -Path tfDriftDetectFile2Upload -Value $content -PassThru
+                        }
+                      } else {
+                        Add-Content -Path tfDriftDetectFile2Upload -Value '<pre>N/A</pre>'
+                      }
+                      Add-Content -Path tfDriftDetectFile2Upload -Value ("`r`n") -passthru
+                      
+                      # 3. To be modified resources
+                      Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">3. To be modified resources</div>') -passthru
+                      if (($tfplanObj.resource_changes | ? {$_.change.actions -eq 'update'}) -ne $null) {
+                        $addressOBj = $tfplanObj.resource_changes | ? {$_.change.actions -eq 'update'} | Select -ExpandProperty address
+                        foreach($address in $addressOBj) {
+                          Write-Host "[Debug] address is $address"
+                          $content = -join('<pre>', $address, '</pre>')
+                          Add-Content -Path tfDriftDetectFile2Upload -Value $content -PassThru
+                        }
+                      } else {
+                        Add-Content -Path tfDriftDetectFile2Upload -Value '<pre>N/A</pre>'
+                      }
+                      Add-Content -Path tfDriftDetectFile2Upload -Value ("`r`n") -passthru
+                      
+                      # 4. Terraform drift Body
+                      Add-Content -Path tfDriftDetectFile2Upload -Value "<div>"
+                      terraform show tfplan.bin -no-color | tee -a tfplan.bin | % { [System.Text.RegularExpressions.Regex]::Unescape($_) } | out-file tfShowOutputFile -Encoding UTF8
+                      Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">4. Terraform drift body</div>') -passthru
+                      Add-Content -Path tfDriftDetectFile2Upload -Value (get-content tfShowOutputFile -raw)
+                      (Get-Content tfDriftDetectFile2Upload).replace('# ', '&#35; ') | Set-Content tfDriftDetectFile2Upload
+                      (Get-Content tfDriftDetectFile2Upload).replace('## ', '&#35;&#35; ') | Set-Content tfDriftDetectFile2Upload
+                      (Get-Content tfDriftDetectFile2Upload).replace('### ', '&#35;&#35;&#35; ') | Set-Content tfDriftDetectFile2Upload
+                      Add-Content -Path tfDriftDetectFile2Upload -Value "</div>"
+
+                      # Upload to build summary
+                      $TFDetectFilePath = "${{ parameters.workingDirectory }}\tfDriftDetectFile2Upload"
+                      echo "##vso[task.addattachment type=Distributedtask.Core.Summary;name=Terraform Drift Detection for ${{ parameters.gcpEnv }};]$TFDetectFilePath"                   
+                      break
+                    }
+                }
+            }
+          failOnStderr: true # Optional
+          workingDirectory: ${{ parameters.workingDirectory }}
+        env:
+          ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY)
+        enabled: true
+
+      - ${{ each step in parameters.additionalPostSteps }}:
+        - ${{ step }}
+
+      - ${{ if eq(parameters.gcpKey, 'HashicorpVaultEnabled') }}:
+        - task: CIODevOps.hashicorp-vault-remove-gcp-key.custom-build-release-task.HashiVaultRmGCPKey@0
+          condition: always()
+          displayName: 'HashiCorp Vault Remove Lease'
+          inputs:
+            HashiEndpoint: '${{ parameters.airID }}-${{ parameters.hashiVaultEnv }}-HashiVault'
+            LeaseId: '$(hashi_vault_credentials.LeaseId)'

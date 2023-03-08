@@ -1,0 +1,26 @@
+{
+    "project": {
+         "air_id": 1964,
+         "name": "MyScheduling"
+     },
+     "api": {
+         "base_url": "http://localhost:3000/api"
+     },
+     "datasource": {
+         "type": "bigquery",
+      "properties": {
+        "project_id": "sbx-10054-autoap1-bd-a1e3c636",
+        "dataset_id": "datalakeopportunity",
+        "create_dataset_id": "TestDATASET4",
+        "path_to_keyfile": "C:/Vinoth/repos/AutoAPI_AIR200827 (3)/config/sbx-10054-autoap1-bd-a1e3c636-1762113f764d.json"
+      },
+         "schema": {
+             "tables": {
+                 "Opportunity": {
+                     "primary_key": "opportunity_id",
+                     "default_orderby": "opportunity_id desc"
+                 }
+             }
+         }
+     }
+}

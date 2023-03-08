@@ -1,0 +1,28 @@
+parameters:
+- name: AIR_ID
+  default: ''
+stages: 
+- stage: code_compliance_check
+  displayName: Code Compliance Scan
+  jobs:
+  - job: security_asap
+    displayName: ASAP Security Scan
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - template: security-job-template/security-asap-job.yml
+      parameters:
+        AIR_ID: ${{ parameters.AIR_ID }}
+    - template: security-job-template/security-check-http-security-header-job.yml
+  - job: authentication_enforcement_v1
+    displayName: Authentication Enforcement
+    steps:
+    - task: CIODevOps.build-task.custom-build-task.AuthenticationEnforcement@0
+      displayName: 'AuthenticationEnforcement'
+      enabled: true
+  - job: ApplicationCodeScan
+    displayName: Application Code Scan
+    steps:
+    - template: /templates/compliance-stage-template/compliance-step-template/security-sca-applicationcodescan.yml
+      parameters:
+        AIR_ID: ${{ parameters.AIR_ID }}

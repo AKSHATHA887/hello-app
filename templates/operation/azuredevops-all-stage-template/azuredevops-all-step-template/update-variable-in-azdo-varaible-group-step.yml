@@ -1,0 +1,94 @@
+parameters:
+- name: variableGroupName
+  type: string
+- name: variableName
+  type: string
+- name: variableValue
+  type: string
+- name: isSecret
+  default: 'false'
+- name: AzureDevOpsOrg
+  default: ''
+- name: AzureDevOpsProjectID
+  default: ''
+- name: AzureDevOpsPAT
+  type: string
+
+steps:
+- task: Powershell@2
+  displayName: Update Variable in AzureDevOps Variable Group
+  name: update_var_in_azdo_var_group
+  continueOnError: false
+  timeoutInMinutes: 60
+  inputs:
+    targetType: inline
+    script: |
+      function Update-AzureDevOpsVariableGroup
+      {
+          param
+          (
+              [Parameter()][string] $variableGroupName,
+              [Parameter()][string] $variableName,
+              [Parameter()][string] $variableValue,
+              [Parameter()][bool] $isSecret,
+              [Parameter()][string] $AzureDevOpsOrg,
+              [Parameter()][string] $AzureDevOpsProjectID
+          )
+          foreach($key in $PSBoundParameters.Keys)
+          {
+              Write-Verbose ("  $($key)" + ' = ' + $PSBoundParameters[$key]) -Verbose
+          }
+          $variableGroup = az pipelines variable-group list --query "[?name == '$variableGroupName']" --org "https://dev.azure.com/$AzureDevOpsOrg" --project "$AzureDevOpsProjectID" --only-show-errors | ConvertFrom-Json 
+          Write-Host "[Debug] variableGroup is $variableGroup"
+          $variable = az pipelines variable-group variable list --group-id $variableGroup.id --query "$variableName" --org "https://dev.azure.com/$AzureDevOpsOrg" --project "$AzureDevOpsProjectID" --only-show-errors | ConvertFrom-Json
+          Write-Host "[Debug] variable is $variable"
+          if($null -ne $variable -and "" -ne $variable)
+          {
+              Write-Host "$variableName UPDATE"
+              $variable = az pipelines variable-group variable update --group-id $variableGroup.id --name $variableName --value $variableValue --secret $isSecret --org "https://dev.azure.com/$AzureDevOpsOrg" --project "$AzureDevOpsProjectID" --only-show-errors | ConvertFrom-Json
+          } 
+          else
+          {
+              Write-Host "$variableName CREATE"
+              $variable = az pipelines variable-group variable create --group-id $variableGroup.id --name $variableName --value $variableValue --secret $isSecret --org "https://dev.azure.com/$AzureDevOpsOrg" --project "$AzureDevOpsProjectID" --only-show-errors | ConvertFrom-Json
+          }
+      }
+
+      # AzureDevOps org
+      $AzureDevOpsOrg = $null
+      if ("${{ parameters.AzureDevOpsOrg }}" -eq "") {
+          Write-Host "[Debug] Parameter AzureDevOpsOrg is empty, set to default AzureDevOpsOrg"
+          $AzureDevOpsOrg = $Env:SYSTEM_COLLECTIONURI.TrimEnd('/') -replace "https://dev.azure.com/",""
+      } else {
+          $AzureDevOpsOrg = "${{ parameters.AzureDevOpsOrg }}"
+      }
+      Write-Host "[Debug] AzureDevOpsOrg is $AzureDevOpsOrg"
+
+      # AzureDevOps project id
+      $AzureDevOpsProjectID = $null
+      if ("${{ parameters.AzureDevOpsProjectID }}" -eq "") {
+          Write-Host "[Debug] Parameter AzureDevOpsProjectID is empty, set to default AzureDevOpsProjectID"
+          $AzureDevOpsProjectID = $Env:SYSTEM_TEAMPROJECTID
+      } else {
+          $AzureDevOpsProjectID = "${{ parameters.AzureDevOpsProjectID }}"
+      }
+      Write-Host "[Debug] AzureDevOpsProjectID is $AzureDevOpsProjectID"
+      
+      $Env:AZURE_DEVOPS_EXT_PAT = "${{ parameters.AzureDevOpsPAT }}"
+
+      az extension add --name azure-devops --only-show-errors
+
+      az devops configure --defaults organization="https://dev.azure.com/$($AzureDevOpsOrg)" project="$($AzureDevOpsProjectID)" | ConvertFrom-Json
+      
+      $isSecret = "${{ parameters.isSecret }}"
+      Write-Host "[Debug] isSecret is $isSecret"
+      $isSecret = [boolean]::Parse($isSecret)
+      
+      Update-AzureDevOpsVariableGroup -variableName '${{ parameters.variableName }}' -variableValue '${{ parameters.variableValue }}' -isSecret $isSecret  -AzureDevOpsOrg "$AzureDevOpsOrg" -AzureDevOpsProjectID "$AzureDevOpsProjectID" -variableGroupName "${{ parameters.variableGroupName }}"
+    failOnStderr: true # Optional
+  env:
+    ARM_CLIENT_SECRET: $(DATABRICKS_AZURE_CLIENT_SECRET)
+    ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+    ARM_TENANT_ID: $(ARM_TENANT_ID)
+    ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+    enabled: true

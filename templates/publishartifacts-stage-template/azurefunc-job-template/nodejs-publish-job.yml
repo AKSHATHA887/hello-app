@@ -1,0 +1,27 @@
+parameters:
+- name: nodeJSVer
+  default: '10.x' 
+- name: zipFileName
+  default: ''
+- name: artifactName
+  default: ''   
+- name: deployInfraTfFolder
+  default: ''      
+
+jobs:
+  - job: 'publish_artifact'
+    displayName: 'Package and publish azure function'
+    steps:
+    - template: /templates/common-step-template/nodejs-install-build-step.yml@AzurePipelinesTemplateAIR2731
+      parameters:
+        nodeJSVer: ${{ parameters.nodeJSVer }} 
+        
+    - template: /templates/publishartifacts-stage-template/azurefunc-job-template/nodejs-package-step.yml@AzurePipelinesTemplateAIR2731
+      parameters:
+        zipFileName: ${{ parameters.zipFileName }} 
+        artifactName: ${{ parameters.artifactName }} 
+        deployInfraTfFolder: ${{ parameters.deployInfraTfFolder }} 
+
+    - publish: $(build.artifactstagingdirectory)/${{ parameters.artifactName }}-$(build.buildnumber).zip
+      artifact: ${{ parameters.artifactName }} 
+      enabled: true

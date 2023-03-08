@@ -1,0 +1,428 @@
+parameters:
+- name: azureEnvName
+  default: ''
+- name: workingDirectory
+  default: ''
+- name: msHostedPoolVmImage
+  default: ''
+- name: azureDevOpsVarGroups
+  type: object
+  default: []
+- name: azureEnvPfxCertName
+  default: ''
+- name: azureEnvPemCertName
+  default: ''
+- name: azurermBackendStorageContainer
+  default: ''
+- name: azurermBackendStorageContainerBlobKey
+  default: ''
+- name: useMultiTFWks
+  type: boolean
+  default: true
+- name: condition
+  default: ''
+- name: dependsOn
+  default: ''
+- name: inputTFVarDefinitionFiles
+  type: object
+  default: []
+- name: inputTFVars
+  type: object
+  default: []
+- name: additionalPreSteps
+  type: stepList
+  default: []
+- name: additionalPostSteps
+  type: stepList
+  default: []
+- name: tfLog
+  type: string
+  default: 'UNSET'
+  values:
+  - UNSET
+  - TRACE
+  - DEBUG
+  - INFO
+  - WARN 
+  - ERROR
+- name: azdoJobContainerImg
+  type: string
+  default: 'tf-container-tf13-azure2.0:latest'
+  values:
+  - 'tf-container-tf12-azure2.0:latest'
+  - 'tf-container-tf13-azure2.0:latest'
+  - 'tf-container-tf13.5-azure2.0:latest'
+  - 'tf-container-tf14-azure2.0:latest'
+
+stages:
+- stage: 'AWS_${{ parameters.azureEnvName }}_TF_drift'
+  ${{ if ne(parameters.dependsOn, '') }}:
+    dependsOn: ${{ parameters.dependsOn }}
+  ${{ if ne(parameters.condition, '') }}:
+    condition: ${{ parameters.condition }}
+  displayName: 'AWS_${{ parameters.azureEnvName }}_TF_drift'
+  variables:
+  - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+      - group: ${{variableGroup}}
+  jobs:
+  - job: Terraform_Plan
+    displayName: AWS_${{ parameters.azureEnvName }}_TF_drift
+    pool:
+      ${{ if ne(parameters.msHostedPoolVmImage, '') }}:
+        vmImage: ${{ parameters.msHostedPoolVmImage }}
+    container:
+      image: acr5064.azurecr.io/${{ parameters.azdoJobContainerImg }}
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    workspace:
+      clean: all
+    steps:
+    - ${{ each step in parameters.additionalPreSteps }}:
+      - ${{ step }}
+    
+    - task: CIODevOps.azuredevOps-build-agent-cf-cli-config-file-generator.custom-build-release-task.AzureDevOps Build Agent TF Cli Config File Generator@0
+      displayName: 'AzureDevOps Build Agent TF Cli Config File Generator'
+      enabled: true
+
+    - task: DownloadSecureFile@1
+      displayName: 'Download Azure secure file pem'
+      inputs:
+        secureFile: ${{ parameters.azureEnvPemCertName }}
+      enabled: true
+
+    - task: DownloadSecureFile@1
+      displayName: 'Download Azure secure file pfx'
+      inputs:
+        secureFile: ${{ parameters.azureEnvPfxCertName }}
+      enabled: true
+
+    - task: Powershell@2
+      displayName: Authenticate Azure CLI and PowerShell
+      continueOnError: false
+      timeoutInMinutes: 2  
+      inputs:
+        targetType: inline
+        script: |
+          & "/sharedfolder/test/Set-AuthenticationContext.ps1" -usesCertificate $true
+          Get-ChildItem -Path ./ -Recurse
+
+          Write-Host "[Debug] Param azurermBackendStorageContainer is ${{ parameters.azurermBackendStorageContainer }}"
+
+          $container_name = "cio-proj$(PROJECT_AIR_ID)$(ENVIRONMENT)tfstate"
+          
+          $blob = "${{ parameters.azurermBackendStorageContainerBlobKey }}env:${{ parameters.azureEnvName }}"
+          Write-Host "[Debug] Checking Container $container_name for blob_key $blob"
+
+          $blob_detail = az storage blob exists --auth-mode login --container-name $container_name --account-name st506405use2tfstate --subscription sb-506405 --name $blob | ConvertFrom-Json
+          Write-Host "[Debug] blob_detail is $blob_detail"
+
+          if((-not [string]::IsNullOrEmpty("${{ parameters.azurermBackendStorageContainer }}")) -and $container_name -ne "${{ parameters.azurermBackendStorageContainer }}")
+          {
+            Write-Host "[Debug] blob container are not identical"
+            # whether old blob exists or not
+            $old_blob = $null
+            $old_blob_detail = az storage blob exists --account-key $env:ARM_ACCESS_KEY --account-name sa5064iactf --auth-mode key --container-name "${{ parameters.azurermBackendStorageContainer }}" --name $blob | ConvertFrom-Json
+            Write-Host "[Debug] old_blob_detail is $old_blob_detail"
+            # if exists, then download
+            if ($($old_blob_detail.exists)) {
+              Write-Host "[Debug] Old Blob exists"
+              $old_blob = az storage blob download --account-key $env:ARM_ACCESS_KEY --account-name sa5064iactf --auth-mode key --container-name "${{ parameters.azurermBackendStorageContainer }}" --file ./terraform.tfstate --name $blob | ConvertFrom-Json
+              Write-Host "[Debug] Old Blob is $old_blob"
+            }
+          }
+          
+          if($null -ne $old_blob -and $null -ne $old_blob.name)
+          {
+            Write-Host "[Debug] Blob Detail: $blob_detail"
+            Write-Host "[Debug] Blob $blob Exists in Remote Backend: $($blob_detail.exists)"
+            Write-Output ("##vso[task.setvariable variable=BLOB_EXISTS]$($blob_detail.exists)")
+            Write-Output ("##vso[task.setvariable variable=blob]$blob")
+            Write-Output ("##vso[task.setvariable variable=container_name]$container_name")
+          }
+
+      env:
+        ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY)   
+        ARM_CLIENT_CERTIFICATE_PATH: $(Agent.TempDirectory)/$(AZURE_PFX_CERT_NAME)
+        ARM_CLIENT_CERTIFICATE_PASSWORD: $(ARM_CLIENT_CERTIFICATE_PASSWORD)
+        ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+        ARM_TENANT_ID: $(ARM_TENANT_ID)
+        ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+      enabled: true            
+
+    - task: Powershell@2
+      displayName: Migrate to Cloud 2.0 Remote Backend Storage Account
+      name: migrate_to_new_storage
+      condition: and(succeeded(), eq(variables['BLOB_EXISTS'], false))        
+      inputs:
+        targetType: inline
+        script: |
+          az storage blob upload --account-name st506405use2tfstate --auth-mode login --file ./terraform.tfstate --container-name $(container_name)  --subscription sb-506405 --name $(blob) --content-type "application/json"
+        failOnStderr: false
+
+    - task: Powershell@2
+      displayName: Terraform Init
+      name: tf_init
+      continueOnError: false
+      timeoutInMinutes: 10
+      inputs:
+        targetType: inline
+        script: |
+          # Comment out by Gerome as it's causing error when blob file not exists for net new
+          # Write-Host "BLOB_EXISTS: $(BLOB_EXISTS)"
+          Get-ChildItem -Path ./ -Recurse
+
+          $cmdArgs = @(
+              "init"
+              "-no-color"
+              "-backend-config=`"subscription_id=3de4faec-c7e9-4255-95af-ab63b5e7c44a`""
+              "-backend-config=`"resource_group_name=rg-506405sharedservices`""
+              "-backend-config=`"storage_account_name=st506405use2tfstate`""
+              "-backend-config=`"container_name=cio-proj$(PROJECT_AIR_ID)$(ENVIRONMENT)tfstate`""
+              "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+              "./"
+            )
+          Write-Host  $cmdArgs 
+          terraform $cmdArgs
+        failOnStderr: true # Optional
+        workingDirectory: ${{ parameters.workingDirectory }}
+      env:
+        ARM_CLIENT_SECRET: $(DATABRICKS_AZURE_CLIENT_SECRET)
+        ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+        ARM_TENANT_ID: $(ARM_TENANT_ID)
+        ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+      enabled: true
+
+    - ${{ if eq(parameters.useMultiTFWks, true) }}:
+      - bash: |
+          terraform workspace select ${{ parameters.azureEnvName }} || terraform workspace new ${{ parameters.azureEnvName }} 
+          terraform workspace list -no-color 
+        displayName: 'Terraform Use Workspace'
+        workingDirectory: ${{ parameters.workingDirectory }}
+        env:
+          ARM_CLIENT_SECRET: $(DATABRICKS_AZURE_CLIENT_SECRET)
+          ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+          ARM_TENANT_ID: $(ARM_TENANT_ID)
+          ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+        enabled: true
+
+    - task: qetza.replacetokens.replacetokens-task.replacetokens@3
+      displayName: 'Replace tokens in tfvars for specific environment'
+      inputs:
+        rootDirectory: ${{ parameters.workingDirectory }}
+        targetFiles: |
+         **/*.tfvars
+      enabled: true
+
+    - task: Powershell@2
+      displayName: Terraform Plan
+      name: tf_plan_in_wks
+      continueOnError: false
+      timeoutInMinutes: 60
+      inputs:
+        targetType: inline
+        script: |
+
+          $cmdArgs = @(
+              "init"
+              "-no-color"
+              "-backend-config=`"subscription_id=3de4faec-c7e9-4255-95af-ab63b5e7c44a`""
+              "-backend-config=`"resource_group_name=rg-506405sharedservices`""
+              "-backend-config=`"storage_account_name=st506405use2tfstate`""
+              "-backend-config=`"container_name=cio-proj$(PROJECT_AIR_ID)$(ENVIRONMENT)tfstate`""
+              "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+              "./"
+            )
+            
+          Write-Host  $cmdArgs 
+          terraform $cmdArgs
+          
+          Get-ChildItem
+
+          if ("${{ parameters.tfLog }}" -ne "UNSET"){
+              $Env:TF_LOG="${{ parameters.tfLog }}"
+              Write-Host "TF_LOG is set to $($Env:TF_LOG)"
+              Get-ChildItem env:
+          } else {
+              Write-Host "TF_LOG is unset"
+          }
+          
+          $cmdArgs = @(
+              "plan"
+              "-input=false"
+              "-out"
+              "`"tfplan.bin`""
+              "-no-color"
+          )
+
+          # Handle terraform variable definitions (.tfvars) files
+          $inputTFVarDefinitionFiles = "${{ join(';', parameters.inputTFVarDefinitionFiles) }}"
+          if (![string]::IsNullOrEmpty($inputTFVarDefinitionFiles)) {
+              $inputTFVarDefinitionFiles.Split(";") | ForEach {
+                if (![string]::IsNullOrEmpty($_)) {
+                  $cmdArgs += -join('-var-file=', '"', $_, '"')
+                }
+              }
+          } else {
+            Write-Host "inputTFVarDefinitionFiles is empty -> $TfVarFiles"
+          }
+
+          # Handle variables on the Command Line
+          $inputTFVars = "${{ join(';', parameters.inputTFVars) }}"
+          if (![string]::IsNullOrEmpty($inputTFVars)) {
+              $inputTFVars.Split(";") | ForEach {
+                if (![string]::IsNullOrEmpty($_)) {
+                  $cmdArgs += -join('-var=', '"', $_, '"')
+                }
+              }
+          } else {
+            Write-Host "inputTFVars is empty -> $TfVarFiles"
+          }
+
+          Write-Host  $cmdArgs
+
+          terraform $cmdArgs
+
+          terraform show -json tfplan.bin > tfplan.json
+        failOnStderr: true
+        workingDirectory: ${{ parameters.workingDirectory }}
+      env:
+        ARM_CLIENT_ID: $(ARM_CLIENT_ID) 
+        ARM_CLIENT_SECRET: $(DATABRICKS_AZURE_CLIENT_SECRET)
+        ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+        ARM_TENANT_ID: $(ARM_TENANT_ID)
+      enabled: true
+
+    - publish: ${{ parameters.workingDirectory }}/tfplan.bin
+      artifact: tfplan.bin
+      enabled: true
+
+    - publish: ${{ parameters.workingDirectory }}/tfplan.json
+      artifact: tfplan.json
+      enabled: true
+
+    - task: PowerShell@2
+      displayName: Terraform Drift Detection
+      name: tf_drift
+      continueOnError: false
+      timeoutInMinutes: 2
+      inputs:
+        targetType: inline
+        script: |
+          Get-ChildItem
+          $cmdArgs = @(
+              "plan"
+              "-input=false"
+              "-out"
+              "`"tfplan.bin`""
+              "-no-color"
+          )
+
+          # Handle terraform variable definitions (.tfvars) files
+          $inputTFVarDefinitionFiles = "${{ join(';', parameters.inputTFVarDefinitionFiles) }}"
+          if (![string]::IsNullOrEmpty($inputTFVarDefinitionFiles)) {
+              $inputTFVarDefinitionFiles.Split(";") | ForEach {
+                if (![string]::IsNullOrEmpty($_)) {
+                  $cmdArgs += -join('-var-file=', '"', $_, '"')
+                }
+              }
+          } else {
+            Write-Host "inputTFVarDefinitionFiles is empty -> $TfVarFiles"
+          }
+
+          # Handle variables on the Command Line
+          $inputTFVars = "${{ join(';', parameters.inputTFVars) }}"
+          if (![string]::IsNullOrEmpty($inputTFVars)) {
+              $inputTFVars.Split(";") | ForEach {
+                if (![string]::IsNullOrEmpty($_)) {
+                  $cmdArgs += -join('-var=', '"', $_, '"')
+                }
+              }
+          } else {
+            Write-Host "inputTFVars is empty -> $TfVarFiles"
+          }
+
+          Write-Host  $cmdArgs
+
+          terraform $cmdArgs | out-null
+          
+          Get-ChildItem
+          
+          switch($lastexitcode)
+          {
+              0  {Write-Host "[Info] No drift detected"; break}
+              1  {Write-Error "There is Error"; break}
+              2  
+              {
+                  Write-Host "[Error] Drift has been detected !!!"
+                  terraform show -json tfplan.bin > tfplan.json
+                  $tfplanObj = Get-Content tfplan.json | convertfrom-Json
+                  Write-Host "[Debug] test is $tfplanObj"
+                  Write-Host "[Debug] test.resource_changes is $($tfplanObj.resource_changes)"
+                  
+                  # 1. To be created resources
+                  Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">1. To be created resources</div>') -passthru
+                  if (($tfplanObj.resource_changes | ? {$_.change.actions -eq 'create'}) -ne $null) {
+                    $addressOBj = $tfplanObj.resource_changes | ? {$_.change.actions -eq 'create'} | Select -ExpandProperty address
+                    foreach($address in $addressOBj) {
+                      Write-Host "[Debug] address is $address"
+                      $content = -join('<pre>', $address, '</pre>')
+                      Add-Content -Path tfDriftDetectFile2Upload -Value $content -PassThru
+                    }
+                  } else {
+                    Add-Content -Path tfDriftDetectFile2Upload -Value '<pre>N/A</pre>'
+                  }
+                  Add-Content -Path tfDriftDetectFile2Upload -Value ("`r`n") -passthru
+                  
+                  # 2. To be deleted resources
+                  Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">2. To be deleted resources</div>') -passthru
+                  if (($tfplanObj.resource_changes | ? {$_.change.actions -eq 'delete'}) -ne $null) {
+                    $addressOBj = $tfplanObj.resource_changes | ? {$_.change.actions -eq 'delete'} | Select -ExpandProperty address
+                    foreach($address in $addressOBj) {
+                      Write-Host "[Debug] address is $address"
+                      $content = -join('<pre>', $address, '</pre>')
+                      Add-Content -Path tfDriftDetectFile2Upload -Value $content -PassThru
+                    }
+                  } else {
+                    Add-Content -Path tfDriftDetectFile2Upload -Value '<pre>N/A</pre>'
+                  }
+                  Add-Content -Path tfDriftDetectFile2Upload -Value ("`r`n") -passthru
+                  
+                  # 3. To be modified resources
+                  Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">3. To be modified resources</div>') -passthru
+                  if (($tfplanObj.resource_changes | ? {$_.change.actions -eq 'update'}) -ne $null) {
+                    $addressOBj = $tfplanObj.resource_changes | ? {$_.change.actions -eq 'update'} | Select -ExpandProperty address
+                    foreach($address in $addressOBj) {
+                      Write-Host "[Debug] address is $address"
+                      $content = -join('<pre>', $address, '</pre>')
+                      Add-Content -Path tfDriftDetectFile2Upload -Value $content -PassThru
+                    }
+                  } else {
+                    Add-Content -Path tfDriftDetectFile2Upload -Value '<pre>N/A</pre>'
+                  }
+                  Add-Content -Path tfDriftDetectFile2Upload -Value ("`r`n") -passthru
+                  
+                  # 4. Terraform drift Body
+                  Add-Content -Path tfDriftDetectFile2Upload -Value "<div>"
+                  terraform show tfplan.bin -no-color | tee -a tfplan.bin | % { [System.Text.RegularExpressions.Regex]::Unescape($_) } | out-file tfShowOutputFile -Encoding UTF8
+                  Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">4. Terraform drift body</div>') -passthru
+                  Add-Content -Path tfDriftDetectFile2Upload -Value (get-content tfShowOutputFile -raw)
+                  (Get-Content tfDriftDetectFile2Upload).replace('# ', '&#35; ') | Set-Content tfDriftDetectFile2Upload
+                  (Get-Content tfDriftDetectFile2Upload).replace('## ', '&#35;&#35; ') | Set-Content tfDriftDetectFile2Upload
+                  (Get-Content tfDriftDetectFile2Upload).replace('### ', '&#35;&#35;&#35; ') | Set-Content tfDriftDetectFile2Upload
+                  Add-Content -Path tfDriftDetectFile2Upload -Value "</div>"
+                  # Upload to build summary
+                  $TFDetectFilePath = "${{ parameters.workingDirectory }}\tfDriftDetectFile2Upload"
+                  echo "##vso[task.addattachment type=Distributedtask.Core.Summary;name=Terraform Drift Detection for ${{ parameters.azureEnvName }};]$TFDetectFilePath"                   
+                  break
+              }
+          }
+        failOnStderr: true # Optional
+        workingDirectory: ${{ parameters.workingDirectory }}
+      env:
+        ARM_CLIENT_ID: $(ARM_CLIENT_ID) 
+        ARM_CLIENT_SECRET: $(DATABRICKS_AZURE_CLIENT_SECRET)
+        ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+        ARM_TENANT_ID: $(ARM_TENANT_ID)
+      enabled: true
+  
+    - ${{ each step in parameters.additionalPostSteps }}:
+      - ${{ step }}

@@ -1,0 +1,121 @@
+parameters:
+- name: vmImage
+  default: 'ubuntu-latest'
+- name: deployInfraTFLayerFolder
+  default: ''
+- name: artifactName
+  default: ''
+- name: nodeJSVer
+  default: '14.x'
+- name: adopSonarQubeProjKey
+  default: ''
+- name: adopSonarQubeProjName
+  default: ''
+- name: sonarQubeExclusions
+  default: '**/node_modules/**,**/*.spec.ts'
+- name: webpackOutputFolder
+  default: 'dist'
+  
+stages: 
+- stage: build_publish_artifact
+  displayName: Build NodeJS, package and Publish Artifact
+  jobs:
+  - job: build_publish_artifact
+    displayName: build_publish_artifact
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+      
+    steps:
+    - task: NodeTool@0
+      displayName: 'Use Node ${{ parameters.nodeJSVer }}'
+      inputs:
+        versionSpec: ${{ parameters.nodeJSVer }}
+      enabled: true
+
+    - task: Npm@1
+      displayName: 'Npm Install'
+      inputs:
+        verbose: false
+      enabled: true
+
+    # - task: Npm@1
+    #   displayName: 'Run Test'
+    #   inputs:
+    #     command: custom
+    #     verbose: true
+    #     customCommand: 'run test'
+    #   enabled: false
+
+    - task: Npm@1
+      displayName: 'Run Build'
+      inputs:
+        command: custom
+        verbose: false
+        customCommand: 'run build'
+      enabled: true
+
+    - ${{ if and(ne(parameters.adopSonarQubeProjKey, ''), ne(parameters.adopSonarQubeProjName, '')) }}:
+      - task: SonarSource.sonarqube.15B84CA1-B62F-4A2A-A403-89B77A063157.SonarQubePrepare@4
+        displayName: 'Prepare analysis on SonarQube'
+        inputs:
+          SonarQube: 'ADOP SonarQube Connection'
+          scannerMode: CLI
+          configMode: manual
+          cliProjectKey: '${{ parameters.adopSonarQubeProjKey }}'
+          cliProjectName: '${{ parameters.adopSonarQubeProjName }}'
+          cliSources: src
+          extraProperties: |
+           #sonar.sourceEncoding=UTF-8
+           sonar.projectName=$(SQProjName)
+           sonar.exclusions=$(Sonar_Exclusions)
+           sonar.tests=test
+           sonar.test.inclusions=**/*.spec.ts
+           sonar.ts.tslintconfigpath=tslint.json
+           sonar.typescript.lcov.reportPaths=.test_output/coverage/lcov.info
+           sonar.typescript.exclusions=**/node_modules/**,**/*.spec.ts
+        enabled: false
+
+      - task: SonarSource.sonarqube.6D01813A-9589-4B15-8491-8164AEB38055.SonarQubeAnalyze@4
+        displayName: 'Run Code Analysis'
+        enabled: false
+
+      - bash: |
+         curl -u $(SQToken) -H "Accept: application/json" -H "Content-Type: application/json" -X GET https://alm.accenture.com/sonar/api/qualitygates/project_status?projectKey=${{ parameters.adopSonarQubeProjKey }} > QGProjStatus.json
+         cat QGProjStatus.json
+         projStatus=$(cat QGProjStatus.json | jq '.projectStatus.status')
+         echo $projStatus
+         if [ $projStatus = '"ERROR"' ]; then
+             echo "Failed at Quality  Gate!"
+             cat QGProjStatus.json | jq .
+             exit 1
+         else
+             echo "Pass Quality Gate!"
+             cat QGProjStatus.json | jq .
+         fi
+        displayName: 'Enforce SonarQube Quality Gate'
+        enabled: false
+
+    # - task: PublishCodeCoverageResults@1
+    #   displayName: 'Publish code coverage from $(System.DefaultWorkingDirectory)/**/*coverage.xml'
+    #   inputs:
+    #     codeCoverageTool: Cobertura
+    #     summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/*coverage.xml'
+    #     reportDirectory: '$(System.DefaultWorkingDirectory)/**/coverage'
+    #     failIfCoverageEmpty: true
+    #   enabled: false
+
+    - bash: |
+       cp -r ./${{ parameters.webpackOutputFolder }} $(Build.SourcesDirectory)/${{ parameters.deployInfraTFLayerFolder}}/
+      displayName: 'Copy infra and webpack output to: distribution folder'
+      enabled: true
+
+    - task: ArchiveFiles@2
+      displayName: 'Build Pipeline Artifact'
+      inputs:
+        rootFolderOrFile: $(Build.SourcesDirectory)/infra
+        archiveFile: $(build.artifactstagingdirectory)/${{ parameters.artifactName }}-$(build.buildnumber).zip
+      enabled: true
+
+    - publish: $(build.artifactstagingdirectory)/${{ parameters.artifactName }}-$(build.buildnumber).zip
+      artifact: ${{ parameters.artifactName }}
+      enabled: true

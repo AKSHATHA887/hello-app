@@ -1,0 +1,28 @@
+parameters:    
+  - name: cacheVersionNodeModules
+    default: '1'
+  - name: cacheVersionCypress
+    default: '1'
+  - name: enabled_cacheNodeModules
+    default: true
+  - name: enabled_cacheCypress
+    default: true
+    
+steps:
+  - task: Cache@2
+    displayName: 'cache npm install'
+    inputs:
+      key: 'npm | ${{ parameters.cacheVersionNodeModules }} | "$(Agent.OS)" | package.json'
+      path: node_modules
+    enabled: ${{ parameters.enabled_cacheNodeModules }}
+  - task: Cache@2
+    displayName: 'cache cypress folder'
+    inputs:
+      key: 'cypress | ${{ parameters.cacheVersionCypress }} | "$(Agent.OS)" | package.json'
+      path: /home/vsts/.cache/Cypress
+    enabled: ${{ parameters.enabled_cacheCypress }}
+  - task: Npm@1
+    displayName: 'Npm Install'
+    inputs:
+      verbose: false
+    enabled: true  

@@ -1,0 +1,54 @@
+##############################################################
+################ Package Atrifcats Template ##################
+##############################################################
+parameters:
+- name: VMIMAGE
+  default: ''
+- name: DOTNETSDKVERSION
+  default: ''
+- name: CONFIGURATION
+  default: ''
+- name: PROJECTWORKINGDIRECTORY
+  default: ''
+- name: AWSPACKAGENAME
+  default: ''
+- name: ENVSTAGES
+  type: object
+  default: ['dev','stg','prod']
+- name: targetFramework
+  default: ''
+- name: nuGetServiceConnectionName
+  default: ''  
+  
+steps:
+  - task: UseDotNet@2
+    displayName: Install DotNet SDK
+    inputs:
+      packageType: 'sdk'
+      version: $(DOTNETSDKVERSION)
+
+  - template: /templates/nuget-common/nuget-authenticate-step.yml@AzurePipelinesTemplateAIR2731
+    parameters:
+      nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }} 
+  
+  - task: DotNetCoreCLI@2
+    displayName: Build DotNetCore App
+    inputs:
+      command: build
+      configuration: ${{ parameters.CONFIGURATION }}
+      projects: '**/*.csproj'
+
+  - script: |
+      dotnet tool install  --global Amazon.Lambda.Tools
+    workingDirectory: '$(System.DefaultWorkingDirectory)'
+    failOnStderr: true
+    displayName: 'Install Dot Net Lambda'
+  
+  - ${{ each env in parameters.ENVSTAGES }}:
+    - template: aws-serverless-publish-step.yml
+      parameters:
+        PROJECTWORKINGDIRECTORY: ${{ parameters.PROJECTWORKINGDIRECTORY }}
+        AWSPACKAGENAME: ${{ parameters.AWSPACKAGENAME }}
+        ENVSTAGES: ${{ env }}
+        targetFramework: ${{ parameters.targetFramework }}
+        CONFIGURATION: ${{ parameters.CONFIGURATION }}

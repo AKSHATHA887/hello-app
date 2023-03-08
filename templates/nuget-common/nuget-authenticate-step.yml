@@ -1,0 +1,23 @@
+parameters:
+- name: nuGetServiceConnectionName
+  default: ''
+  type: string
+
+steps:
+  - bash: |
+      if [ -z "$NUGETSERVICECONNECTIONNAME" ]; 
+      then
+        echo "##vso[task.setvariable variable=toRunNugetTask;]false"
+        echo "Nutget service connection was not set"
+      else
+        echo "##vso[task.setvariable variable=toRunNugetTask;]true"
+        echo "Nutget service connection was set"
+      fi
+    displayName: Check for Nuget service connection    
+
+  - task: NuGetAuthenticate@0
+    condition: ne(variables['toRunNugetTask'], 'false') 
+    enabled: true
+    displayName: Nuget Authentication
+    inputs:
+      nuGetServiceConnections: ${{ parameters.nuGetServiceConnectionName }}

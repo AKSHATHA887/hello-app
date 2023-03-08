@@ -1,0 +1,24 @@
+parameters:
+- name: vmImage
+  default: 'ubuntu-latest'
+- name: nodeJSVer
+  default: '10.x' 
+- name: zipFileName
+  default: 'source.zip'
+- name: ARTIFACT_NAME
+  default: 'sample-azure-fn'   
+- name: DEPLOY_INFRA_TF_LAYER_FOLDER
+  default: 'infra/002-001-sample-azure-fn'  
+
+stages: 
+  - stage: 'build_publish_azurefunction'
+    displayName: 'Build and Publish Azure Function'
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    jobs:
+    - template: /templates/publishartifacts-stage-template/azurefunc-job-template/nodejs-publish-job.yml@AzurePipelinesTemplateAIR2731
+      parameters:
+        nodeJSVer: ${{ parameters.nodeJSVer }} 
+        zipFileName: ${{ parameters.zipFileName }} 
+        artifactName: ${{ parameters.ARTIFACT_NAME }} 
+        deployInfraTfFolder: ${{ parameters.DEPLOY_INFRA_TF_LAYER_FOLDER }} 

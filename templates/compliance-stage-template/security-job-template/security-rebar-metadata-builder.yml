@@ -1,0 +1,4 @@
+steps:
+- task: REBAR-MetadataBuilder.beta-linux-metadatabuilder-rebar-build-release-task.custom-build-release-task.REBAR-Metadata-Builder@0
+  displayName: 'REBAR Metadata Builder'
+  enabled: true

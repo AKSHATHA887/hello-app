@@ -1,0 +1,77 @@
+parameters:
+# Mandatory Parameters
+- name: dockerImgTag
+  default: ''
+- name: dockerRegistry
+  default: ''
+# Optional Parameters
+- name: aquaScannerImg
+  default: 'acncio.azurecr.io/aqua-scanner:latest'
+- name: acnCIOACRDockerRegistry
+  default: 'acncio.azurecr.io Read'
+- name: aquaMgmtConsoleConn
+  default: 'Aqua Prod Console'
+- name: isPromoteImg
+  default: 'false'
+- name: vendorServiceConnection
+  default: ''
+
+steps:
+- task: Docker@2
+  displayName: Login to ACN CIO ACR
+  inputs:
+    containerRegistry: '${{ parameters.acnCIOACRDockerRegistry }}'
+    command: 'login'
+  enabled: true
+
+- script: |
+      echo "[Debug] dockerImgTag is ${{ parameters.dockerImgTag }}"
+      echo "[Debug] dockerRegistry is ${{ parameters.dockerRegistry }}"
+      echo "[Debug] isPromoteImg is ${{ parameters.isPromoteImg }}"
+      img_user=`docker inspect ${{ parameters.dockerImgTag }} | jq '.[0].ContainerConfig.User'`
+      [ $img_user = "" -o $img_user = "root" -o $img_user = "root:root" ] && img_user="appuser:appgroup"
+      docker build -t ${{ parameters.dockerImgTag }} -f- . <<EOF
+      FROM ${{ parameters.dockerImgTag }}
+      USER root:root
+      LABEL ispromote="${{ parameters.isPromoteImg }}"
+      ENV ispromote "${{ parameters.isPromoteImg }}"
+      RUN /microenforcer aqua-init
+      USER $img_user
+      EOF
+  displayName: 'Aqua-Init'
+  condition: eq('${{ parameters.vendorServiceConnection }}','')
+  enabled: true
+  
+# Aqua labeling:
+- script: |
+        echo "FROM ${{ parameters.dockerImgTag }}" | docker build --label image_type="vendor_image" -t ${{ parameters.dockerImgTag}} -
+  displayName: 'Aqua-Init'
+  condition: ne('${{ parameters.vendorServiceConnection }}','')
+  enabled: true
+
+# Pull Common Aqua Scanner docker image
+- script: docker pull ${{ parameters.aquaScannerImg }}
+  displayName: 'Get Aqua Scanner Image'
+  enabled: true
+
+# Scan with Aqua
+- task: aquasecScanner@4
+  displayName: Aqua Scanning Image ${{ parameters.dockerImgTag }}
+  target: host
+  inputs:
+    image: ${{ parameters.dockerImgTag }}
+    scanType: 'local'
+    customFlags: '--direct-cc'
+    registerCompliant: true
+    scanner: ${{ parameters.aquaScannerImg }}
+    registry: ${{ parameters.dockerRegistry }}
+    connection: ${{ parameters.aquaMgmtConsoleConn }}
+  enabled: true
+
+# Logout from ACR
+- task: Docker@2
+  displayName: Logout from ACN CIO ACR
+  inputs:
+    containerRegistry: ${{ parameters.acnCIOACRDockerRegistry }}
+    command: 'logout'
+  enabled: true

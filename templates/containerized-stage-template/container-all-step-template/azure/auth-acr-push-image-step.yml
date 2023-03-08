@@ -1,0 +1,23 @@
+parameters: 
+- name: dockerImgTag
+  default: ''
+- name: dockerRegistry  # Name of the registry integration in Aqua
+  default: ''
+
+steps:
+- task: PowerShell@2
+  displayName: 'Docker login'
+  inputs:
+    targetType: 'inline'
+    script: |
+      Write-Host "[Debug] dockerImgTag is ${{ parameters.dockerImgTag }}"
+      Write-Host "[Debug] dockerRegistry is ${{ parameters.dockerRegistry }}"
+      az login --service-principal --username "$(ARM_CLIENT_ID)" --tenant "$(ARM_TENANT_ID)" --password "$(DATABRICKS_AZURE_CLIENT_SECRET)"
+      az account set --subscription="$(ARM_SUBSCRIPTION_ID)"
+      az acr login --name "${{ parameters.dockerRegistry }}"
+  enabled: true
+
+# Push our image into ACR
+- script: docker push ${{ parameters.dockerImgTag }}
+  displayName: 'Push ${{ parameters.dockerImgTag }} image'
+  enabled: true

@@ -1,0 +1,45 @@
+parameters:
+  - name: STARTUPSLEEPTIME
+    default: 30
+  - name: CONFIGURATION
+    default: Debug
+  - name: targetFramework
+    default: netcoreapp3.1
+
+steps: 
+- task: PowerShell@2
+  displayName: Smoke Test
+  inputs:
+    targetType: 'inline'
+    bash: |
+        mkdir sandbox_smokeTest
+        cd sandbox_smokeTest
+        npm init -y
+        sudo npm install -g serverless
+        sudo serverless
+
+        # Install Lambda tools.
+        dotnet tool install  --global Amazon.Lambda.Tools
+
+        # Copy generated project to current directory.
+        cp -r $(System.DefaultWorkingDirectory)/AWSServerlessSample/. ./
+
+        cd AWSServerlessSampleWebapi_71310.WebApi
+        
+        # create lmabda package 
+        dotnet lambda package --configuration ${{ parameters.CONFIGURATION}} --framework ${{ parameters.targetFramework}} --output-package ./lambda/lambdapackage.zip
+        
+        # copy awsConfig files to lambda folder
+        cp ./awsConfigs/* ./lambda
+    
+        cd lambda
+        ls
+        RESULT=$(sudo serverless invoke local --function api --path FakeApiGatewayProxyRequest.json -e ASPNETCORE_ENVIRONMENT=Development| grep statusCode | jq -r '.statusCode')
+        sleep 30
+        echo $RESULT
+        if [ "$RESULT" != "200" ]
+        then 
+          echo "Aws smoke test failed with StatusCode:$RESULT"; exit 1; 
+        fi
+    displayName: "Aws Smoke Test"
+    condition: succeededOrFailed()

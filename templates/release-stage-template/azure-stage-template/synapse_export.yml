@@ -1,0 +1,139 @@
+parameters:
+- name: azureEnvName
+  default: ''  
+- name: azureDevOpsVarGroups
+  type: object
+  default: []
+- name: azureEnvPfxCertName
+  default: '' 
+- name: azureEnvPemCertName
+  default: ''    
+- name: condition
+  default: ''
+- name: dependsOn
+  default: ''  
+- name: repoName
+  default: ''  
+- name: pipelineResourceIdentifier
+  default: '' 
+- name: deployInfraTFLayerFolder
+  default: '' 
+- name: azureDevOpsEnvironment
+  default: ''
+- name:  workspaceName
+  default: ''
+- name: azdoJobContainerImg
+  type: string
+  default: 'tf-container-tf1.0-azure2.0:latest'
+  values:
+  - 'tf-container-tf13-azure2.0:latest'
+  - 'tf-container-tf13.5-azure2.0:latest'
+  - 'tf-container-tf14-azure2.0:latest'
+  - 'tf-container-tf1.0-azure2.0:latest'
+  - 'tf-container-ml-tf14:latest'
+
+stages:
+- stage: 'synapse_publish_${{ parameters.azureEnvName }}'
+  ${{ if ne(parameters.dependsOn, '') }}:
+    dependsOn: ${{ parameters.dependsOn }}
+  ${{ if ne(parameters.condition, '') }}:
+    condition: ${{ parameters.condition }}
+  displayName: 'synapse_publish ${{ parameters.azureEnvName }}'
+  variables:
+  - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+      - group: ${{variableGroup}}
+  jobs:
+    - deployment: synapse_publish
+      displayName: synapse_publish_job ${{ parameters.azureEnvName }}
+      pool:
+        vmImage: $(vmUbuntuImage)
+      container:
+        image: acr5064.azurecr.io/${{ parameters.azdoJobContainerImg }}
+        endpoint: CIO-5064-Tfmod-Pull-ACR
+      workspace:
+        clean: all
+      environment: ${{ parameters.azureDevOpsEnvironment }}
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - checkout: self
+            - checkout: ${{ parameters.repoName }}
+              path: main
+              persistCredentials: true
+            - download: none
+
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file pfx'
+              inputs:
+                secureFile: ${{ parameters.azureEnvPfxCertName }}
+              enabled: true
+
+            - task: DownloadSecureFile@1
+              displayName: 'Download secure file pem'
+              inputs:
+                secureFile: ${{ parameters.azureEnvPemCertName }}
+              enabled: true
+
+            - download: ${{ parameters.pipelineResourceIdentifier}}
+              enabled: true
+              
+            - task: Powershell@2
+              displayName: Troubleshooting Directory
+              continueOnError: false
+              timeoutInMinutes: 5  
+              inputs:
+                targetType: inline
+                script: |
+                  Get-ChildItem -Path ./ 
+                  Get-ChildItem -Path ./ -recurse
+                workingDirectory: $(Pipeline.Workspace)       
+              enabled: true
+
+            - task: Powershell@2
+              displayName: Authenticate Azure CLI and PowerShell
+              continueOnError: false
+              timeoutInMinutes: 5  
+              inputs:
+                targetType: inline
+                script: |
+                  #Authenticate Cli
+                  & "/sharedfolder/test/Set-AuthenticationContext.ps1" -usesCertificate $True
+                workingDirectory: $(Pipeline.Workspace)
+              env:
+                ARM_CLIENT_CERTIFICATE_PASSWORD: $(ARM_CLIENT_CERTIFICATE_PASSWORD)
+                ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+                ARM_TENANT_ID: $(ARM_TENANT_ID)
+                ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+                ARM_CLIENT_CERTIFICATE_PATH: $(Agent.TempDirectory)/${{ parameters.azureEnvPfxCertName }}
+              enabled: true
+
+            - task: Powershell@2
+              displayName: Export templates
+              continueOnError: false
+              inputs:
+                targetType: inline
+                script: |
+                  Write-Host "Getting files"
+
+                  try {
+                    Export-AzSynapseSqlScript -WorkspaceName ${{ parameters.workspaceName }} -OutputFolder $(Agent.BuildDirectory)/main/sqlscript -ErrorAction 'silentlycontinue'
+                    Export-AzSynapseKqlScript -WorkspaceName ${{ parameters.workspaceName }} -OutputFolder $(Agent.BuildDirectory)/main/kqlscript -ErrorAction 'silentlycontinue'
+                    az synapse notebook export --output-folder $(Agent.BuildDirectory)/main/notebook --workspace-name ${{ parameters.workspaceName }}
+                  }
+                  catch {
+                    $line = $_.InvocationInfo.ScriptLineNumber
+                    Write-Host -f Red "Error occors when exporting templates @ Line number: $line !" $_.Exception.Message
+                  }
+              env:
+                ARM_CLIENT_CERTIFICATE_PASSWORD: $(ARM_CLIENT_CERTIFICATE_PASSWORD)
+                ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+                ARM_TENANT_ID: $(ARM_TENANT_ID)
+                ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+                ARM_CLIENT_CERTIFICATE_PATH: $(Agent.TempDirectory)/${{ parameters.azureEnvPfxCertName }}
+              enabled: true
+
+            - task: PublishBuildArtifacts@1
+              inputs:
+                pathToPublish: '$(Agent.BuildDirectory)/main'
+                artifactName: main

@@ -1,0 +1,26 @@
+parameters:
+# Mandatory Parameters
+- name: sourceImage
+  default: ''
+- name: targetImage
+  default: ''
+
+steps:
+- task: Powershell@2
+  displayName: Docker Retag
+  name: docker_retag
+  continueOnError: false
+  timeoutInMinutes: 60
+  inputs:
+    targetType: inline
+    script: |
+      $cmdArgs = @(
+          "tag"
+          "`"${{ parameters.sourceImage }}`""
+          "`"${{ parameters.targetImage }}`""
+      )
+      Write-Host "[Debug] Initial cmdArgs is $cmdArgs"
+      
+      docker $cmdArgs
+    failOnStderr: true
+  enabled: true

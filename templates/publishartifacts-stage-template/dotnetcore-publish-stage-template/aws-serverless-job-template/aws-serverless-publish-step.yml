@@ -1,0 +1,74 @@
+##############################################################
+################ Package Atrifcats Template ##################
+##############################################################
+parameters:
+- name: PROJECTWORKINGDIRECTORY
+  default: ''
+- name: ENVSTAGES
+  default: ''
+- name: AWSPACKAGENAME
+  default: ''
+- name: targetFramework
+  default: ''
+- name: CONFIGURATION
+  default: ''
+
+steps:
+  - script: |
+        dotnet lambda package --configuration ${{ parameters.CONFIGURATION }} --framework ${{ parameters.targetFramework }} --output-package dist-pkg-${{ parameters.ENVSTAGES }}/${{ parameters.AWSPACKAGENAME }}-${{ parameters.ENVSTAGES }}
+    workingDirectory: '$(PROJECTWORKINGDIRECTORY)/'
+    displayName: 'Create lambda-package'
+
+  - task: PowerShell@2
+    displayName: Serverless-Package
+    condition: succeededOrFailed()
+    inputs: 
+      targetType: inline
+      script: |
+          Get-ChildItem -Path $(PROJECTWORKINGDIRECTORY)/awsConfigs/ -Recurse -File
+          if (Test-Path $(PROJECTWORKINGDIRECTORY)/awsConfigs/buildspec.yml -PathType leaf)
+          {
+            remove-item $(PROJECTWORKINGDIRECTORY)/awsConfigs/buildspec.yml
+          }
+          if (Test-Path $(PROJECTWORKINGDIRECTORY)/awsConfigs/buildspec.${{ parameters.ENVSTAGES }}.yml -PathType leaf)
+          {
+            rename-item $(PROJECTWORKINGDIRECTORY)/awsConfigs/buildspec.${{ parameters.ENVSTAGES }}.yml -NewName buildspec.yml -force
+          }
+          Get-ChildItem -Path $(PROJECTWORKINGDIRECTORY)/awsConfigs/ -Recurse -File
+         
+          $sourcefile1 = "$(PROJECTWORKINGDIRECTORY)/awsConfigs/serverless.yml"
+          $sourcefile2 = "$(PROJECTWORKINGDIRECTORY)/awsConfigs/buildspec.yml"
+          $sourcefile3 = "$(PROJECTWORKINGDIRECTORY)/awsConfigs/serverless.config.${{ parameters.ENVSTAGES }}.yml"
+          $sourcefile4 = "$(PROJECTWORKINGDIRECTORY)/awsConfigs/serverless.app.config.yml"
+
+          $destpath = "$(PROJECTWORKINGDIRECTORY)/dist-pkg-${{ parameters.ENVSTAGES }}"
+
+          if (Test-Path $sourcefile1 -PathType leaf)
+          {
+            Copy-Item -Path $sourcefile1 -Destination $destpath -Recurse -Force -ErrorAction Stop
+          }
+          if (Test-Path $sourcefile2 -PathType leaf)
+          {
+            Copy-Item -Path $sourcefile2 -Destination $destpath -Recurse -Force -ErrorAction Stop
+          }
+          if (Test-Path $sourcefile3 -PathType leaf)
+          {
+            Copy-Item -Path $sourcefile3 -Destination $destpath -Recurse -Force -ErrorAction Stop
+          }
+          if (Test-Path $sourcefile4 -PathType leaf)
+          {
+            Copy-Item -Path $sourcefile4 -Destination $destpath -Recurse -Force -ErrorAction Stop
+          }
+          Get-ChildItem -Path $(PROJECTWORKINGDIRECTORY)/dist-pkg-${{ parameters.ENVSTAGES }}
+
+  - task: ArchiveFiles@2
+    inputs:
+      rootFolderOrFile: '$(PROJECTWORKINGDIRECTORY)/dist-pkg-${{ parameters.ENVSTAGES }}'
+      includeRootFolder: false
+      archiveType: 'zip'
+      archiveFile: '$(Build.ArtifactStagingDirectory)/${{ parameters.ENVSTAGES }}/source.zip'
+      replaceExistingArchive: true
+      
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: drop'
+    condition: succeededOrFailed()

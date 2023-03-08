@@ -1,0 +1,10 @@
+parameters:
+- name: AIR_ID
+  default: ''
+
+steps: 
+- task: CIODevOps.applicationcodescan-build-release-task.custom-build-release-task.ApplicationCodeScan@0
+  displayName: ApplicationCodeScan
+  inputs:
+    air_id: ${{ parameters.AIR_ID }}
+  enabled: true

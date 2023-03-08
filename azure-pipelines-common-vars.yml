@@ -1,0 +1,38 @@
+variables:
+  VMIMAGE: 'ubuntu-latest'
+  ARTIFACT_NAME: 'strategy-proof-of-conceptCF'
+  ARCHIVE_FILE_PATH_TO_EXTRACT: 'strategy-proof-of-conceptCF-*.zip'
+  
+  DEPLOY_INFRA_TF_LAYER_FOLDER: 'infra/002-001-cf-autoapi'
+  NODE_JS_VER: '14.x'
+  WEBPACK_OUTPUT_FOLDER: 'dist'
+  AIR_ID: '200827'
+
+  AZURERM_BACKEND_STORAGE_CONTAINER: '200827-strategy-proof-of-concept-tfstate'
+  AZURERM_BACKEND_STORAGE_CONTAINER_BLOB_KEY: 'cio/200827/strategy-proof-of-concept/cf-autoapi/autoapi.ciotfstate'
+
+  AZUREDEVOPS_SBX_VAR_GROUP_NAME: 'cio-cloud-gcp-sbx-200827-strategy-proof-of-concept'
+  AZUREDEVOPS_DEV_VAR_GROUP_NAME: 'cio-cloud-gcp-dev-200827-strategy-proof-of-concept'
+  AZUREDEVOPS_TEST_VAR_GROUP_NAME: 'cio-cloud-gcp-test-200827-strategy-proof-of-concept'
+  AZUREDEVOPS_STAGE_VAR_GROUP_NAME: 'cio-cloud-gcp-stage-200827-strategy-proof-of-concept'
+  AZUREDEVOPS_PERF_VAR_GROUP_NAME: 'cio-cloud-gcp-perf-200827-strategy-proof-of-concept'
+  AZUREDEVOPS_PROD_VAR_GROUP_NAME: 'cio-cloud-gcp-prod-200827-strategy-proof-of-concept'
+
+  AZUREDEVOPS_SBX_ENVIRONMENT_NAME: '200827-strategy-proof-of-concept-GCP-Sbx'
+  AZUREDEVOPS_DEV_ENVIRONMENT_NAME: '200827-strategy-proof-of-concept-GCP-Dev'
+  AZUREDEVOPS_TEST_ENVIRONMENT_NAME: '200827-strategy-proof-of-concept-GCP-Test'
+  AZUREDEVOPS_STAGE_ENVIRONMENT_NAME: '200827-strategy-proof-of-concept-GCP-Stage'
+  AZUREDEVOPS_PERF_ENVIRONMENT_NAME: '200827-strategy-proof-of-concept-GCP-Perf'
+  AZUREDEVOPS_PROD_ENVIRONMENT_NAME: '200827-strategy-proof-of-concept-GCP-Prod'
+
+  ADOP_SONARQUBE_PROJECT_KEY: ''
+  ADOP_SONARQUBE_PROJECT_NAME: ''
+  ADOP_SONARQUBE_EXCLUSIONS: ''
+
+  GCP_SBX_PROJECT_NAME: 'sbx-200827-autoapi1-bd'
+  GCP_DEV_PROJECT_NAME: ''
+  GCP_TEST_PROJECT_NAME: ''
+  GCP_STAGE_PROJECT_NAME: ''
+  GCP_PERF_PROJECT_NAME: ''
+  GCP_PROD_PROJECT_NAME: '' 
+

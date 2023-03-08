@@ -1,0 +1,431 @@
+parameters:
+- name: awsEnvName
+  default: ''
+- name: msHostedPoolVmImage
+  default: ''
+- name: privatePoolName
+  default: ''
+- name: artifactName
+  default: ''
+- name: archiveFilePathToExtract
+  default: ''
+- name: azureDevOpsVarGroups
+  type: object
+  default: []
+- name: azureDevOpsSecureFiles
+  type: object
+  default: []
+- name: stripOffWinNewlinesInSecureFiles
+  type: boolean
+  default: true
+- name: azurermBackendStorageContainer
+  default: ''
+- name: azurermBackendStorageContainerBlobKey
+  default: ''
+- name: deployInfraTFLayerFolder
+  default: ''
+- name: condition
+  default: ''
+- name: dependsOn
+  type: object
+  default: 
+    - PREVIOUS 
+- name: pipelineResourceIdentifier
+  default: ''
+- name: inputTFVarDefinitionFiles
+  type: object
+  default: []
+- name: inputTFVars
+  type: object
+  default: []
+- name: azureDevOpsEnvironment
+  default: ''
+- name: tfLog
+  type: string
+  default: 'UNSET'
+  values:
+  - UNSET
+  - TRACE
+  - DEBUG
+  - INFO
+  - WARN 
+  - ERROR
+- name: azdoJobContainerImg
+  type: string
+  default: 'tf-container-tf1.0.2-aws2.0:latest'
+  values:
+  - 'tf-container-tf1.0.2-aws2.0:latest'
+  - 'tf-container-tf0.14.5-aws2.0:latest'
+  - 'tf-container-aws-ubuntu1904:latest'
+- name: jobTimeoutInMinutes
+  type: string
+  default: 120
+- name: tfApplyTimeoutInMinutes
+  type: string
+  default: 60
+
+stages:
+- stage: 'Terraform_Apply_Destroy_${{ parameters.awsEnvName }}'
+  ${{ if and(ne(parameters.dependsOn, ''), ne(join(';',parameters.dependsOn), 'PREVIOUS')) }}:
+    dependsOn: ${{ parameters.dependsOn }}
+  ${{ if ne(parameters.condition, '') }}:
+    condition: ${{ parameters.condition }}
+  displayName: 'Terraform Apply Destroy ${{ parameters.awsEnvName }}'
+  variables:
+  - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+      - group: ${{variableGroup}}
+  jobs:
+  - deployment: TF_Apply_Destroy
+    timeoutInMinutes: ${{ parameters.jobTimeoutInMinutes }}
+    displayName: Terraform Apply Destroy ${{ parameters.awsEnvName }}
+    pool:
+      ${{ if ne(parameters.msHostedPoolVmImage, '') }}:
+        vmImage: ${{ parameters.msHostedPoolVmImage }}
+      ${{ if ne(parameters.privatePoolName, '') }}:
+        name: ${{ parameters.privatePoolName }}
+    container:
+      image: acr5064.azurecr.io/${{ parameters.azdoJobContainerImg }}
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    workspace:
+      clean: all
+    environment: ${{ parameters.azureDevOpsEnvironment }}
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: none
+
+          - ${{ each secureFile in parameters.azureDevOpsSecureFiles }}:
+             - task: DownloadSecureFile@1
+               displayName: 'Download secure file ${{secureFile}}'
+               inputs:
+                 secureFile: ${{secureFile}}
+               enabled: true
+
+          - download: ${{ parameters.pipelineResourceIdentifier}}
+            enabled: true
+
+          - task: ExtractFiles@1
+            displayName: 'Extract Artifact'
+            inputs:
+              archiveFilePatterns: '$(Pipeline.Workspace)/${{ parameters.pipelineResourceIdentifier}}/${{ parameters.artifactName }}/${{ parameters.archiveFilePathToExtract }}'
+              destinationFolder: '$(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract'
+              cleanDestinationFolder: true
+            enabled: true
+
+          - task: CIODevOps.azuredevOps-build-agent-cf-cli-config-file-generator.custom-build-release-task.AzureDevOps Build Agent TF Cli Config File Generator@0
+            displayName: 'AzureDevOps Build Agent TF Cli Config File Generator'
+            enabled: true
+
+          - task: Powershell@2
+            displayName: Prepare for Terraform Registries
+            continueOnError: false
+            timeoutInMinutes: 2  
+            inputs:
+              targetType: inline
+              script: |
+                Write-Host "[Debug]Agent OS is: $env:AGENT_OS"
+                # For Windows Build Agentww
+                if ($env:AGENT_OS -match '^.*Windows.*$') {
+                    Write-Host "[Debug]...........Windows Agent Detected........"
+                    if (Test-Path "$($env:APPDATA)/terraform.rc") {
+                      $oriTfRcFilePath = "$($env:APPDATA)/terraform.rc"
+                      $oriTfRcStr = Get-Content "$oriTfRcFilePath" -Raw
+                      $oriTfRcStr = $oriTfRcStr -replace "acnciotfregistry.accenture.com", "acnciotfregistry.ciostage.accenture.com"
+                      Add-Content $oriTfRcFilePath "`n $oriTfRcStr"
+                    }
+                # For Linux Build Agent
+                } ElseIf ($env:AGENT_OS -match '^.*Linux.*$') {
+                    Write-Host "[Debug]...........Linux Agent Detected........"
+                    if (Test-Path "~/.terraformrc") {
+                      $oriTfRcFilePath = "~/.terraformrc"
+                      $oriTfRcStr = Get-Content "$oriTfRcFilePath" -Raw
+                      $oriTfRcStr = $oriTfRcStr -replace "acnciotfregistry.accenture.com", "acnciotfregistry.ciostage.accenture.com"
+                      Add-Content $oriTfRcFilePath "`n $oriTfRcStr"
+                    }
+                } else {
+                    Write-Error "[Error]*********Agent OS is neither Windows nor Linux: $env:AGENT_OS **********"
+                }
+            enabled: true 
+
+          - task: Powershell@2
+            displayName: Terraform Init
+            name: tf_init
+            continueOnError: false
+            timeoutInMinutes: 2
+            inputs:
+              targetType: inline
+              script: |
+                Get-ChildItem env:
+                Get-ChildItem
+
+                $cmdArgs = @(
+                    "init"
+                    "-no-color"
+                    "-backend-config=`"subscription_id=3de4faec-c7e9-4255-95af-ab63b5e7c44a`""
+                    "-backend-config=`"resource_group_name=rg-506405sharedservices`""
+                    "-backend-config=`"storage_account_name=st506405use2tfstate`""
+                    "-backend-config=`"container_name=cio-proj$(PROJECT_AIR_ID)$(ENVIRONMENT)tfstate`""
+                    "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+                  )
+                Write-Host  $cmdArgs 
+                terraform $cmdArgs
+              failOnStderr: true # Optional
+              workingDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+            env:
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_KEY)
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY)
+              AWS_REGION: $(AWS_REGION)
+              ARM_CLIENT_SECRET: $(DATABRICKS_AZURE_CLIENT_SECRET)
+              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+              ARM_TENANT_ID: $(ARM_TENANT_ID)
+              ARM_SUBSCRIPTION_ID: "3de4faec-c7e9-4255-95af-ab63b5e7c44a"
+            enabled: true
+
+          - bash: |
+              terraform workspace select ${{ parameters.awsEnvName }} || terraform workspace new ${{ parameters.awsEnvName }} 
+              terraform workspace list -no-color 
+            displayName: 'Terraform Use Workspace'
+            workingDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+            env:
+              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+              ARM_CLIENT_SECRET: $(DATABRICKS_AZURE_CLIENT_SECRET)
+              ARM_TENANT_ID: $(ARM_TENANT_ID)
+              ARM_SUBSCRIPTION_ID: "3de4faec-c7e9-4255-95af-ab63b5e7c44a"
+            enabled: true
+
+          - task: qetza.replacetokens.replacetokens-task.replacetokens@3
+            displayName: 'Replace tokens in tfvars for specific environment'
+            inputs:
+              rootDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+              targetFiles: |
+               **/*.tfvars
+            enabled: true
+
+          - task: Powershell@2
+            displayName: Terraform Plan Destroy
+            name: tf_plan_destroy_in_wks
+            continueOnError: false
+            timeoutInMinutes: 60
+            inputs:
+              targetType: inline
+              script: |
+                Get-ChildItem
+
+                ################## 1. Update TF_LOG mode ##################
+                Write-Host "[Info] 1. Start to copy secure files"
+                if ("${{ parameters.tfLog }}" -ne "UNSET"){
+                    $Env:TF_LOG="${{ parameters.tfLog }}"
+                    Write-Host "[Info] TF_LOG is set to $($Env:TF_LOG)"
+                    Get-ChildItem env:
+                } else {
+                    Write-Host "[Info] TF_LOG is unset"
+                }
+
+                ################## 2. Copy secure files if exists ##################
+                $azureDevOpsSecureFiles = "${{ join(';', parameters.azureDevOpsSecureFiles) }}"
+                Write-Host "[Info] 2. Start to copy secure files"
+                if (![string]::IsNullOrEmpty($azureDevOpsSecureFiles)) {
+                    Get-ChildItem $(Agent.TempDirectory)
+                    $azureDevOpsSecureFiles.Split(";") | ForEach {
+                      if (![string]::IsNullOrEmpty($_)) {
+                        if (Test-Path "$(Agent.TempDirectory)/$_"){
+                            Copy-Item $(Agent.TempDirectory)/$_ .
+                            # Strip off Windows-formatted newlines for secure file
+                            $stripOffWinNewlinesInSecureFiles = $true
+                            if ("False" -eq "${{ parameters.stripOffWinNewlinesInSecureFiles}}") {
+                                $stripOffWinNewlinesInSecureFiles = $false
+                            }
+                            if ($stripOffWinNewlinesInSecureFiles) {
+                              $isContainsEOL = (get-content -raw -path "$(Agent.TempDirectory)/$_") -match "`r`n"
+                              if ($isContainsEOL) {
+                                Write-Host "[Debug] Windows-formatted newlines in secure file detected"
+                                Write-Host "[Debug] Before handling EOL:"
+                                (get-content -raw -path "$(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}/$($_)") -match "`r`n"
+                                Write-Host "[Debug] Start to strip off Windows-formatted newlines for secure file"
+                                $ori_securefile = "$(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}/$($_)"
+                                $temp_txt = [IO.File]::ReadAllText($ori_securefile) -replace "`r`n", "`n"
+                                [IO.File]::WriteAllText($ori_securefile, $temp_txt)
+                                Write-Host "[Debug] After handling EOL:"
+                                (get-content -raw -path "$(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}/$($_)") -match "`r`n"
+                              } else {
+                                Write-Host "[Debug] No Windows-formatted newlines in secure file"
+                              }
+                            }
+                        } else {
+                            Write-Host "[Error] Secure file not exists in Agent.TempDirectory"
+                        }
+                      } else {
+                          Write-Host "[Error] single inputTFVarDefinitionFile is empty"
+                      }
+                    }
+                } else {
+                    Write-Host "[Info] azureDevOpsSecureFiles is empty"
+                }
+
+                Write-Host "[Debug] Get Items in current location"
+                Get-ChildItem
+
+                ################## 3. Terraform init ##################
+                Write-Host "[Info] 3. Start to rerun terraform init"
+                $cmdArgs = @(
+                    "init"
+                    "-no-color"
+                    "-backend-config=`"subscription_id=3de4faec-c7e9-4255-95af-ab63b5e7c44a`""
+                    "-backend-config=`"resource_group_name=rg-506405sharedservices`""
+                    "-backend-config=`"storage_account_name=st506405use2tfstate`""
+                    "-backend-config=`"container_name=cio-proj$(PROJECT_AIR_ID)$(ENVIRONMENT)tfstate`""
+                    "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+                )
+                Write-Host  $cmdArgs 
+                terraform $cmdArgs
+
+                $cmdArgs = @(
+                    "plan"
+                    "-destroy"
+                    "-out"
+                    "`"tfplan.bin`""
+                    "-no-color"
+                )
+
+                ################## 4. Terraform Plan ##################
+                Write-Host "[Info] 4. Start to run terraform plan destroy"
+                # Handle terraform variable definitions (.tfvars) files
+                $inputTFVarDefinitionFiles = "${{ join(';', parameters.inputTFVarDefinitionFiles) }}"
+                if (![string]::IsNullOrEmpty($inputTFVarDefinitionFiles)) {
+                    $inputTFVarDefinitionFiles.Split(";") | ForEach {
+                      if (![string]::IsNullOrEmpty($_)) {
+                        $cmdArgs += -join('-var-file=', '"', $_, '"')
+                      }
+                    }
+                } else {
+                  Write-Host "[Info] inputTFVarDefinitionFiles is empty"
+                }
+
+                # Handle variables on the Command Line
+                $inputTFVars = "${{ join(';', parameters.inputTFVars) }}"
+                if (![string]::IsNullOrEmpty($inputTFVars)) {
+                    $inputTFVars.Split(";") | ForEach {
+                      if (![string]::IsNullOrEmpty($_)) {
+                        $cmdArgs += -join('-var=', '"', $_, '"')
+                      }
+                    }
+                } else {
+                  Write-Host "[Info] inputTFVars is empty"
+                }
+
+                $Env:TF_VAR_assume_role_arn = $Env:APP_TEAM_DEPLOYER_ROLE
+                $Env:TF_VAR_access_key  = $Env:AWS_ACCESS_KEY
+                $Env:TF_VAR_secret_key  = $Env:AWS_SECRET_KEY
+                $Env:TF_VAR_region  = $Env:AWS_REGION
+
+                Write-Host "[Debug] cmdArgs is $cmdArgs"
+
+                terraform $cmdArgs
+              failOnStderr: true # Optional
+              workingDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+            env:
+              AWS_SECRET_KEY: $(AWS_SECRET_KEY)
+              AWS_ACCESS_KEY: $(AWS_ACCESS_KEY)
+              AWS_REGION: $(AWS_REGION)
+              APP_TEAM_DEPLOYER_ROLE: $(APP_TEAM_DEPLOYER_ROLE)
+              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+              ARM_CLIENT_SECRET: $(DATABRICKS_AZURE_CLIENT_SECRET)
+              ARM_TENANT_ID: $(ARM_TENANT_ID)
+              ARM_SUBSCRIPTION_ID: "3de4faec-c7e9-4255-95af-ab63b5e7c44a"
+              GOOGLE_OAUTH_ACCESS_TOKEN: "none"
+            enabled: true
+
+          - task: Powershell@2
+            displayName: Terraform Apply Destroy
+            name: tf_apply_destroy_in_wks
+            continueOnError: false
+            timeoutInMinutes: ${{ parameters.tfApplyTimeoutInMinutes }}
+            inputs:
+              targetType: inline
+              script: |
+                Get-ChildItem
+
+                ################## 1. Update TF_LOG mode ##################
+                if ("${{ parameters.tfLog }}" -ne "UNSET"){
+                    $Env:TF_LOG="${{ parameters.tfLog }}"
+                    Write-Host "[Info] TF_LOG is set to $($Env:TF_LOG)"
+                    Get-ChildItem env:
+                } else {
+                    Write-Host "[Info] TF_LOG is unset"
+                }
+
+                ################## 2. Copy secure files if exists ##################
+                $azureDevOpsSecureFiles = "${{ join(';', parameters.azureDevOpsSecureFiles) }}"
+                Write-Host "[Info] 2. Start to copy secure files"
+                if (![string]::IsNullOrEmpty($azureDevOpsSecureFiles)) {
+                    Get-ChildItem $(Agent.TempDirectory)
+                    $azureDevOpsSecureFiles.Split(";") | ForEach {
+                      if (![string]::IsNullOrEmpty($_)) {
+                        if (Test-Path "$(Agent.TempDirectory)/$_"){
+                            Copy-Item $(Agent.TempDirectory)/$_ .
+                            # Strip off Windows-formatted newlines for secure file
+                            $stripOffWinNewlinesInSecureFiles = $true
+                            if ("False" -eq "${{ parameters.stripOffWinNewlinesInSecureFiles}}") {
+                                $stripOffWinNewlinesInSecureFiles = $false
+                            }
+                            if ($stripOffWinNewlinesInSecureFiles) {
+                              $isContainsEOL = (get-content -raw -path "$(Agent.TempDirectory)/$_") -match "`r`n"
+                              if ($isContainsEOL) {
+                                Write-Host "[Debug] Windows-formatted newlines in secure file detected"
+                                Write-Host "[Debug] Before handling EOL:"
+                                (get-content -raw -path "$(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}/$($_)") -match "`r`n"
+                                Write-Host "[Debug] Start to strip off Windows-formatted newlines for secure file"
+                                $ori_securefile = "$(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}/$($_)"
+                                $temp_txt = [IO.File]::ReadAllText($ori_securefile) -replace "`r`n", "`n"
+                                [IO.File]::WriteAllText($ori_securefile, $temp_txt)
+                                Write-Host "[Debug] After handling EOL:"
+                                (get-content -raw -path "$(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}/$($_)") -match "`r`n"
+                              } else {
+                                Write-Host "[Debug] No Windows-formatted newlines in secure file"
+                              }
+                            }
+                        } else {
+                            Write-Host "[Error] Secure file not exists in Agent.TempDirectory"
+                        }
+                      } else {
+                          Write-Host "[Error] single inputTFVarDefinitionFile is empty"
+                      }
+                    }
+                } else {
+                    Write-Host "[Info] azureDevOpsSecureFiles is empty"
+                }
+
+                Write-Host "[Debug] Get Items in current location"
+                Get-ChildItem
+
+                ################## 3. Terraform Apply Destroy ##################
+                Write-Host "[Info] 3. Start to run terraform apply destroy"
+                $cmdArgs = @(
+                    "apply"
+                    "-auto-approve"
+                    "./tfplan.bin"
+                    "-no-color"
+                )
+
+                $Env:TF_VAR_assume_role_arn = $Env:APP_TEAM_DEPLOYER_ROLE
+                $Env:TF_VAR_access_key  = $Env:AWS_ACCESS_KEY
+                $Env:TF_VAR_secret_key  = $Env:AWS_SECRET_KEY
+                $Env:TF_VAR_region  = $Env:AWS_REGION
+
+                Write-Host "[Debug] cmdArgs is $cmdArgs"
+
+                terraform $cmdArgs
+              failOnStderr: true # Optional
+              workingDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+            env:
+              AWS_SECRET_KEY: $(AWS_SECRET_KEY)
+              AWS_ACCESS_KEY: $(AWS_ACCESS_KEY)
+              AWS_REGION: $(AWS_REGION)
+              APP_TEAM_DEPLOYER_ROLE: $(APP_TEAM_DEPLOYER_ROLE)
+              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+              ARM_CLIENT_SECRET: $(DATABRICKS_AZURE_CLIENT_SECRET)
+              ARM_TENANT_ID: $(ARM_TENANT_ID)
+              ARM_SUBSCRIPTION_ID: "3de4faec-c7e9-4255-95af-ab63b5e7c44a"
+              GOOGLE_OAUTH_ACCESS_TOKEN: "none"
+            enabled: true

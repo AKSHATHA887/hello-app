@@ -1,0 +1,62 @@
+parameters:
+- name: vmImage
+  default: ''
+- name: dockerFilePath
+  default: ''
+- name: dockerImgTag
+  default: ''
+- name: dockerRegistry
+  default: ''
+- name: azureDevOpsVarGroups
+  type: object
+  default: []
+- name: acnCIOACRDockerRegistry
+  default: 'acncio.azurecr.io Read'
+- name: aquaScannerImg
+  default: 'acncio.azurecr.io/aqua-scanner:latest'
+- name: aquaMgmtConsoleConn
+  default: 'Aqua Prod Console'
+- name: TF_SRC_PATH
+  default:  ''
+- name: DOTNETSDKVERSION
+  default: '5.x'
+- name: CONFIGURATION
+  default: ''
+- name: WEBAPIS
+  default: 'No'
+- name: nuGetServiceConnectionName
+  default: ''  
+
+stages:
+- stage: build_and_publish
+  displayName: build_and_publish
+  jobs:
+  - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+    - job: Scan_Aqua_Build_Push_ECR_${{ replace(variableGroup, '-', '_') }}
+      variables:
+      - group: ${{variableGroup}}
+      pool:
+        vmImage: ${{ parameters.vmImage }}
+      container:
+        image: acr5064.azurecr.io/tf-container-aws-ubuntu1904:latest
+        endpoint: CIO-5064-Tfmod-Pull-ACR
+      steps:
+      - template: /templates/containerized/aws-bridge/ecr-stage-template/scan-aqua-build-push-ecr.yml
+        parameters:
+          dockerFilePath: ${{ parameters.dockerFilePath }}
+          dockerImgTag: ${{ parameters.dockerImgTag }}
+          acnCIOACRDockerRegistry: ${{ parameters.acnCIOACRDockerRegistry }}
+          aquaScannerImg: ${{ parameters.aquaScannerImg }}
+          aquaMgmtConsoleConn: ${{ parameters.aquaMgmtConsoleConn }}
+  - job: dotnet_Build_and_publish
+    displayName: dotnet Build and publish
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    steps:
+    - template: swagger-job-template/publish-swagger-job.yml
+      parameters:
+        DOTNETSDKVERSION: ${{ parameters.DOTNETSDKVERSION }}
+        CONFIGURATION: ${{ parameters.CONFIGURATION }}
+        WEBAPIS: ${{ parameters.WEBAPIS }}
+        nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+    - template: container-job-template/dotnetcore-buildandpublish-steps-job.yml  

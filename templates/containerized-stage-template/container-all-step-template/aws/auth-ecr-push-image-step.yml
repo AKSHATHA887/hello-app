@@ -1,0 +1,48 @@
+parameters:
+# Mandatory Parameters
+- name: dockerImgTag
+  default: ''
+- name: identifier
+  default: ''
+
+steps:
+# Login ECR
+- bash: |
+    _temp_role=$(aws sts assume-role \
+      --role-arn "$NEW_APP_TEAM_DEPLOYER_ROLE" \
+      --role-session-name "aws-bridge-access-assume-$(Build.BuildNumber)")
+
+    export AWS_ACCESS_KEY_ID=$(echo $_temp_role | jq -r .Credentials.AccessKeyId)
+    export AWS_SECRET_ACCESS_KEY=$(echo $_temp_role | jq -r .Credentials.SecretAccessKey)
+    export AWS_SESSION_TOKEN=$(echo $_temp_role | jq -r .Credentials.SessionToken)
+    export AWS_DEFAULT_REGION=$AWS_REGION
+
+    _docker_repo=$(aws ecr get-authorization-token --output text  --query 'authorizationData[].proxyEndpoint')
+    echo $_docker_repo
+
+    aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $_docker_repo
+  displayName: 'Login ${{ parameters.identifier }} ECR'
+  env:
+    AWS_ACCESS_KEY_ID: $(NEW_AWS_ACCESS_KEY)
+    AWS_SECRET_ACCESS_KEY: $(NEW_AWS_SECRET_KEY) 
+    AWS_REGION: $(AWS_REGION)
+    AWS_ACCOUNT_ID: $(AWS_ACCOUNT_ID)
+  enabled: true
+
+- task: Powershell@2
+  displayName: Docker Image Push
+  name: docker_image_push
+  continueOnError: false
+  timeoutInMinutes: 60
+  inputs:
+    targetType: inline
+    script: |
+      $cmdArgs = @(
+          "push"
+          "`"${{ parameters.dockerImgTag }}`""
+      )
+      Write-Host "[Debug] Initial cmdArgs is $cmdArgs"
+
+      docker $cmdArgs
+    failOnStderr: true
+  enabled: true

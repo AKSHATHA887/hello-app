@@ -1,0 +1,68 @@
+parameters:
+- name: VMIMAGE
+  default: ''
+- name: TF_SRC_PATH
+  default: ''
+- name: AQUA_SCANNER_REGISTRY
+  default: ''
+- name: FULL_DIST_IMAGE
+  default: ''
+- name: AQUA_SCANNER_IMAGE
+  default: ''
+- name: AQUA_SCANNER_CONNECTION
+  default: ''
+- name: GOOGLE_CONTAINER_REGISTRY
+  default: ''
+- name: FULL_DIST_IMAGE_TO_PUSH
+  default: ''
+- name: GOOGLE_CONTAINER_REGISTRY_SBX
+  default: ''
+- name: FULL_DIST_IMAGE_SBX
+  default: ''
+- name: DOTNETSDKVERSION
+  default: 3.x
+- name: CONFIGURATION
+  default: Debug
+- name: WEBAPIS
+  default: No
+- name: nuGetServiceConnectionName
+  default: ''  
+  
+stages: 
+- stage: build_and_publish
+  displayName: Build and Publish Artifacts
+  jobs:
+  - job: Build_Scan_Push_Image
+    displayName: Build_Scan_Push_Image
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}
+    steps:
+    - ${{ if ne(parameters.nuGetServiceConnectionName, '') }}:
+      - template: /templates/nuget-common/nuget-docker-prereqs-step.yml
+        parameters: 
+          nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+          dotnetSdkVersion: ${{ parameters.DOTNETSDKVERSION }}
+    - template: container-job-template/docker-build-aqua-scan-steps-job.yml
+      parameters:
+        AQUA_SCANNER_REGISTRY: ${{ parameters.AQUA_SCANNER_REGISTRY }}
+        FULL_DIST_IMAGE: ${{ parameters.FULL_DIST_IMAGE }}
+        AQUA_SCANNER_IMAGE: ${{ parameters.AQUA_SCANNER_IMAGE }}
+        AQUA_SCANNER_CONNECTION: ${{ parameters.AQUA_SCANNER_CONNECTION }}
+        
+    - template: container-job-template/docker-push-gcr-steps-job.yml
+      parameters:
+        GOOGLE_CONTAINER_REGISTRY: ${{ parameters.GOOGLE_CONTAINER_REGISTRY }}
+        FULL_DIST_IMAGE_TO_PUSH: ${{ parameters.FULL_DIST_IMAGE_TO_PUSH }}
+
+  - job: dotnet_Build_and_publish
+    displayName: dotnet Build and publish
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}
+    steps:
+    - template: swagger-job-template/publish-swagger-job.yml
+      parameters:
+        DOTNETSDKVERSION: ${{ parameters.DOTNETSDKVERSION }}
+        CONFIGURATION: ${{ parameters.CONFIGURATION }}
+        WEBAPIS: ${{ parameters.WEBAPIS }}
+        nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+    - template: container-job-template/dotnetcore-buildandpublish-steps-job.yml # Template reference

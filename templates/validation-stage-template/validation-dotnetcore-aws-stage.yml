@@ -1,0 +1,44 @@
+##############################################################
+################ Functional Validation Template ##############
+##############################################################
+
+parameters:
+- name: VMIMAGE  # defaults for any parameters that aren't specified
+  default: ''
+- name: DOTNETSDKVERSION  # defaults for any parameters that aren't specified
+  default: ''
+- name: CONFIGURATION
+  default: ''
+- name: targetFramework
+  default: ''
+- name: STARTUPSLEEPTIME
+  default: ''
+
+
+stages: 
+- stage: functional_validation_checks
+  displayName: Functional Validation Checks
+  jobs:
+  - job: Install_SDK
+    displayName: Install_SDK
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}
+    steps:
+    - task: UseDotNet@2
+      displayName: Install DotNet SDK
+      inputs:
+        packageType: 'sdk'
+        version: ${{ parameters.DOTNETSDKVERSION }}   
+
+  - job: smoke_test
+    displayName: Smoke Test
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}
+    steps:
+    - template: dotnetcore-smoketest-job-template/awslambda-smoke-test-job.yml # Template reference
+      parameters:
+        CONFIGURATION: ${{ parameters.CONFIGURATION }}
+        targetFramework: ${{ parameters.targetFramework }}
+        STARTUPSLEEPTIME: ${{ parameters.STARTUPSLEEPTIME }} #30 # in second
+
+   

@@ -1,0 +1,80 @@
+parameters:
+- name: VMIMAGE
+  default: ''
+- name: TF_SRC_PATH
+  default: ''
+
+steps:
+  - task: CIODevOps.azuredevOps-build-agent-cf-cli-config-file-generator.custom-build-release-task.AzureDevOps Build Agent TF Cli Config File Generator@0
+    displayName: 'AzureDevOps Build Agent TF Cli Config File Generator'
+    enabled: false
+  - bash: |
+      cwd=$PWD
+      cd ${{ parameters.TF_SRC_PATH }}
+      for d in ./* ; do
+          echo "scans the directory $d for configuration files"
+          terraform fmt --diff=true -check=true $d
+      done
+      cd $cwd
+    displayName: 'Terraform Format'
+    enabled: true
+
+  - bash: |
+      cwd=$PWD
+      cd ${{ parameters.TF_SRC_PATH }}
+      for d in ./* ; do
+          echo "Validate terraform files in folder $d"
+          terraform init -backend=false $d
+          terraform validate -no-color $d
+      done
+      cd $cwd
+    displayName: 'Terraform Validate'
+    enabled: true
+
+  - task: PowerShell@2
+    name: compliance_test
+    displayName: 'Terraform Compliance Test'
+    inputs:
+      targetType: inline
+      script: |
+        # Execute Pester Test, write results as NUnit to publish into the build
+        Get-ChildItem /sharedfolder/test
+        $result = Invoke-Pester -Script (Join-Path "/sharedfolder/test" "moduleconsume.ps1") `
+          -OutputFormat 'NUnitXML' -OutputFile (Join-Path $Env:COMMON_TESTRESULTSDIRECTORY 'workspace.parameters.tests.xml') `
+          -PassThru
+        $result.TestResult | Where-Object { $_.Result -eq 'Failed' -or $_.Result -eq 'Pending' } | ForEach-Object {
+          $test = $_
+          switch ($test.Result) {
+            'Failed' {
+              $msg = "$($test.Describe) | $($test.Context) | $($test.Name) | $($test.FailureMessage)"
+              $line = ""
+              $file = ""
+              if ($test.StackTrace -Match '<ScriptBlock>,\s*(?<file>.+(?<=\.ps1)):\s*line\s*(?<line>\d+)') {
+                $line = $Matches.line
+                $file = $Matches.file
+              }
+              Write-Error "Compliance tests failed : $msg"
+              break;
+            }
+            'Pending' {
+              $msg = "$($test.Describe) | $($test.Context) | $($test.Name) : Is Pending Implementation"
+              Write-Warning "Compliance tests has few warning : $msg" 
+              break;
+            }
+          }
+        }
+        if ($result.FailedCount -gt 0) {
+          exit $result.FailedCount
+        }
+    enabled: true
+
+  - task: PublishTestResults@2
+    condition: succeededOrFailed()
+    name: publish_compliance_results
+    displayName: Publish Compliance Test Result
+    inputs:
+      testResultsFormat: NUnit
+      testResultsFiles: "*.xml"
+      testRunTitle: "Compliance Test"
+      searchFolder: $(Common.TestResultsDirectory)
+    enabled: true

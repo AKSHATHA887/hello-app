@@ -1,0 +1,92 @@
+parameters:
+- name: AZURE_PFX_CERT_NAME
+  default: ''
+- name: AZURE_PEM_CERT_NAME
+  default: ''
+- name: ARM_CLIENT_CERTIFICATE_PASSWORD
+  default: ''
+- name: ARM_CLIENT_ID
+  default: ''
+- name: ARM_TENANT_ID
+  default: ''
+- name: ARM_SUBSCRIPTION_ID
+  default: ''
+- name: VMIMAGE
+  default: ''
+- name: ARM_RG_NAME
+  default: ''
+- name: ARM_App_NAME
+  default: ''
+- name: SOURCE_ARTIFACT
+  default: ''
+- name: CONTAINER_IMAGE
+  default: ''
+- name: pipelineResourceIdentifier
+  default: ''
+- name: azureEnvName
+  default: ''
+- name: PROJECTNAME
+  default: ''
+
+stages:
+  - stage: DeployWebAppService
+    displayName: Deploy AzureWebAppService
+    dependsOn: Terraform_Apply_${{ parameters.azureEnvName }}
+    jobs:
+      - job: AzureWebAppDeploy
+        workspace:
+          clean: all
+        pool:
+          vmImage: ${{ parameters.VMIMAGE }}
+        container:
+          image: ${{ parameters.CONTAINER_IMAGE }} 
+          endpoint: CIO-5064-Tfmod-Pull-ACR
+        steps:
+
+          - download: ${{ parameters.pipelineResourceIdentifier }}
+            enabled: true
+
+          - task: ExtractFiles@1
+            displayName: 'Extract Artifact'
+            inputs:
+              archiveFilePatterns: '$(Pipeline.Workspace)/${{ parameters.pipelineResourceIdentifier }}/build-bundle-${{ parameters.SOURCE_ARTIFACT }}/*.zip'
+              destinationFolder: '$(Pipeline.Workspace)/build-bundle-${{ parameters.SOURCE_ARTIFACT }}-extract'
+              cleanDestinationFolder: true
+            enabled: true
+          
+          - task: DownloadSecureFile@1
+            displayName: Download PFX Certificate
+            name: cacertificate
+            inputs:
+              secureFile: ${{ parameters.AZURE_PFX_CERT_NAME }}
+
+          - task: DownloadSecureFile@1
+            displayName: Download PEM Certificate
+            name: cacertificate2
+            inputs:
+              secureFile: ${{ parameters.AZURE_PEM_CERT_NAME }}
+          
+          - task: Powershell@2
+            displayName: Authenticate Azure CLI via PowerShell
+            continueOnError: false
+            timeoutInMinutes: 2  
+            inputs:
+              targetType: inline
+              script: |
+                & "/sharedfolder/test/Set-AuthenticationContext.ps1" -usesCertificate $True
+            env:
+              ARM_CLIENT_CERTIFICATE_PASSWORD: ${{ parameters.ARM_CLIENT_CERTIFICATE_PASSWORD }}
+              ARM_CLIENT_CERTIFICATE_PATH: $(Agent.TempDirectory)/${{ parameters.AZURE_PFX_CERT_NAME }}
+              ARM_CLIENT_ID: ${{ parameters.ARM_CLIENT_ID }}
+              ARM_TENANT_ID: ${{ parameters.ARM_TENANT_ID }}
+              ARM_SUBSCRIPTION_ID: ${{ parameters.ARM_SUBSCRIPTION_ID }}
+            enabled: true
+
+          - task: Powershell@2
+            displayName: Az Webapp deploy via Azure CLI
+            continueOnError: false
+            timeoutInMinutes: 2  
+            inputs:
+              targetType: inline
+              script: |
+                 az webapp deployment source config-zip --resource-group ${{ parameters.ARM_RG_NAME }} --name ${{ parameters.ARM_App_NAME }} --src '$(Pipeline.Workspace)/build-bundle-${{ parameters.SOURCE_ARTIFACT }}-extract//${{ parameters.PROJECTNAME }}.zip'

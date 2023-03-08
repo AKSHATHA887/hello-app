@@ -1,0 +1,281 @@
+parameters:
+- name: hostedAgentPoolVMImage
+  default: 'ubuntu-latest'
+- name: AwsEnv 
+  default: ''
+- name: workingDirectory 
+  default: ''
+- name: awsBackendStorageContainerBlobKey
+  default: ''
+- name: awsBackendStorageContainer
+  default: ''
+- name: useMultiTFWks
+  type: boolean
+  default: true
+- name: azureDevOpsVarGroups
+  type: object
+  default: []
+- name: additionalPreSteps
+  type: stepList
+  default: []
+- name: additionalPostSteps
+  type: stepList
+  default: []
+
+stages:
+- stage: AWS_${{ parameters.AwsEnv }}_TF_drift
+  ${{ if ne(length(parameters.azureDevOpsVarGroups), 0) }}:
+    variables:
+    - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+      - group: ${{variableGroup}}
+  jobs:
+  - job: AWS_${{ parameters.AwsEnv }}_TF_drift
+    pool:
+      vmImage: ${{ parameters.hostedAgentPoolVMImage }}
+    container:
+      image: acr5064.azurecr.io/tf-container-aws-ubuntu1904:latest
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    steps:
+      - checkout: self
+        persistCredentials: true
+
+      - ${{ each step in parameters.additionalPreSteps }}:
+        - ${{ step }}
+
+      - task: Powershell@2
+        displayName: Debug
+        name: Debug
+        continueOnError: false
+        timeoutInMinutes: 2  
+        inputs:
+          targetType: inline
+          script: |
+            Get-ChildItem
+          failOnStderr: true # Optional
+          workingDirectory: ${{ parameters.workingDirectory }}
+        enabled: true
+
+      - task: Powershell@2
+        displayName: Terraform Format
+        name: tf_fmt_drift
+        continueOnError: false
+        timeoutInMinutes: 2  
+        inputs:
+          targetType: inline
+          script: |
+            $cmdArgs = @(
+                "fmt"
+                "--diff=true"
+                "-check=true"
+                "./"
+              )
+            terraform $cmdArgs
+          failOnStderr: true # Optional
+          workingDirectory: ${{ parameters.workingDirectory }}
+        enabled: true
+
+      - task: CIODevOps.azuredevOps-build-agent-cf-cli-config-file-generator.custom-build-release-task.AzureDevOps Build Agent TF Cli Config File Generator@0
+        displayName: 'AzureDevOps Build Agent TF Cli Config File Generator'
+        enabled: true
+
+      - task: Powershell@2
+        displayName: Terraform Init
+        name: tf_init_drift
+        continueOnError: false
+        timeoutInMinutes: 2
+        inputs:
+          targetType: inline
+          script: |
+            $cmdArgs = @(
+                "init"
+                "-no-color"
+                "-backend-config=`"access_key=$(TOOL_TF_BACKEND_KEY)`""
+                "-backend-config=`"storage_account_name=sa5064iactf`""
+                "-backend-config=`"key=${{ parameters.awsBackendStorageContainerBlobKey }}`""
+                "-backend-config=`"container_name=${{ parameters.awsBackendStorageContainer }}`""
+                "./"
+              )
+            Write-Host  $cmdArgs 
+            terraform $cmdArgs
+          failOnStderr: true # Optional
+          workingDirectory: ${{ parameters.workingDirectory }}
+        env:
+          TOOL_TF_BACKEND_KEY: $(TOOL_TF_BACKEND_KEY)   
+        enabled: true
+
+      - task: Powershell@2
+        displayName: Terraform Validate
+        name: tf_validate_drift
+        continueOnError: false
+        timeoutInMinutes: 2
+        inputs:
+          targetType: inline
+          script: |
+              $cmdArgs = @(
+                "validate"
+                "-no-color"
+              )
+              terraform $cmdArgs
+          failOnStderr: true # Optional
+          workingDirectory: ${{ parameters.workingDirectory }}
+        enabled: true
+
+      - ${{ if eq(parameters.useMultiTFWks, true) }}:
+        - bash: |
+            terraform workspace select ${{ parameters.AwsEnv }} || terraform workspace new ${{ parameters.AwsEnv }} 
+            terraform workspace list -no-color 
+          displayName: 'Terraform Use Workspace'
+          workingDirectory: ${{ parameters.workingDirectory }}
+          env:
+            ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY) 
+          enabled: true
+
+      - task: qetza.replacetokens.replacetokens-task.replacetokens@3
+        displayName: 'Replace tokens in tfvars for specific environment'
+        inputs:
+          rootDirectory: ${{ parameters.workingDirectory }}
+          targetFiles: |
+           **/*.tfvars
+        enabled: true
+
+      - task: Powershell@2
+        displayName: Terraform Plan
+        name: tf_plan
+        continueOnError: false
+        timeoutInMinutes: 2
+        inputs:
+          targetType: inline
+          script: |
+            dir
+            $Env:TF_VAR_access_key  = $Env:AWS_ACCESS_KEY
+            $Env:TF_VAR_secret_key  = $Env:AWS_SECRET_KEY
+            $Env:AWS_ACCESS_KEY_ID   =  $Env:AWS_ACCESS_KEY
+            $Env:AWS_SECRET_ACCESS_KEY = $Env:AWS_SECRET_KEY
+
+            $cmdArgs = @(
+              "plan"
+              "-var-file=${{ parameters.AwsEnv }}.tfvars"
+              "-lock=true"
+              "-out=tfplan.bin"
+            )
+            terraform $cmdArgs
+
+            terraform show -json tfplan.bin > tfplan.json
+          failOnStderr: true # Optional
+          workingDirectory: ${{ parameters.workingDirectory }}
+        env:
+          AWS_ACCESS_KEY: $(NEW_AWS_ACCESS_KEY)
+          AWS_SECRET_KEY: $(NEW_AWS_SECRET_KEY)
+          AWS_ACCESS_KEY_ID : $(NEW_AWS_ACCESS_KEY)
+          AWS_SECRET_ACCESS_KEY : $(NEW_AWS_SECRET_KEY)
+        enabled: true
+
+      - publish: ${{ parameters.workingDirectory }}/tfplan.bin
+        artifact: tfplan.bin
+        enabled: true
+
+      - publish: ${{ parameters.workingDirectory }}/tfplan.json
+        artifact: tfplan.json
+        enabled: true
+
+      - task: PowerShell@2
+        displayName: Terraform Drift Detection
+        name: tf_drift
+        continueOnError: false
+        timeoutInMinutes: 2
+        inputs:
+          targetType: inline
+          script: |
+            Get-ChildItem
+            $Env:TF_VAR_access_key  = $Env:AWS_ACCESS_KEY
+            $Env:TF_VAR_secret_key  = $Env:AWS_SECRET_KEY
+            $Env:AWS_ACCESS_KEY_ID   =  $Env:AWS_ACCESS_KEY
+            $Env:AWS_SECRET_ACCESS_KEY = $Env:AWS_SECRET_KEY
+            $cmdArgs = @(
+              "plan"
+              "-var-file=${{ parameters.AwsEnv }}.tfvars"
+              "-detailed-exitcode"
+            )
+            terraform $cmdArgs | out-null
+            Get-ChildItem
+            switch($lastexitcode)
+            {
+                0  {Write-Host "[Info] No drift detected"; break}
+                1  {Write-Error "There is Error"; break}
+                2  
+                {
+                    Write-Host "[Error] Drift has been detected !!!"
+                    terraform show -json tfplan.bin > tfplan.json
+                    $tfplanObj = Get-Content tfplan.json | convertfrom-Json
+                    Write-Host "[Debug] test is $tfplanObj"
+                    Write-Host "[Debug] test.resource_changes is $($tfplanObj.resource_changes)"
+                    
+                    # 1. To be created resources
+                    Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">1. To be created resources</div>') -passthru
+                    if (($tfplanObj.resource_changes | ? {$_.change.actions -eq 'create'}) -ne $null) {
+                      $addressOBj = $tfplanObj.resource_changes | ? {$_.change.actions -eq 'create'} | Select -ExpandProperty address
+                      foreach($address in $addressOBj) {
+                        Write-Host "[Debug] address is $address"
+                        $content = -join('<pre>', $address, '</pre>')
+                        Add-Content -Path tfDriftDetectFile2Upload -Value $content -PassThru
+                      }
+                    } else {
+                      Add-Content -Path tfDriftDetectFile2Upload -Value '<pre>N/A</pre>'
+                    }
+                    Add-Content -Path tfDriftDetectFile2Upload -Value ("`r`n") -passthru
+                    
+                    # 2. To be deleted resources
+                    Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">2. To be deleted resources</div>') -passthru
+                    if (($tfplanObj.resource_changes | ? {$_.change.actions -eq 'delete'}) -ne $null) {
+                      $addressOBj = $tfplanObj.resource_changes | ? {$_.change.actions -eq 'delete'} | Select -ExpandProperty address
+                      foreach($address in $addressOBj) {
+                        Write-Host "[Debug] address is $address"
+                        $content = -join('<pre>', $address, '</pre>')
+                        Add-Content -Path tfDriftDetectFile2Upload -Value $content -PassThru
+                      }
+                    } else {
+                      Add-Content -Path tfDriftDetectFile2Upload -Value '<pre>N/A</pre>'
+                    }
+                    Add-Content -Path tfDriftDetectFile2Upload -Value ("`r`n") -passthru
+                    
+                    # 3. To be modified resources
+                    Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">3. To be modified resources</div>') -passthru
+                    if (($tfplanObj.resource_changes | ? {$_.change.actions -eq 'update'}) -ne $null) {
+                      $addressOBj = $tfplanObj.resource_changes | ? {$_.change.actions -eq 'update'} | Select -ExpandProperty address
+                      foreach($address in $addressOBj) {
+                        Write-Host "[Debug] address is $address"
+                        $content = -join('<pre>', $address, '</pre>')
+                        Add-Content -Path tfDriftDetectFile2Upload -Value $content -PassThru
+                      }
+                    } else {
+                      Add-Content -Path tfDriftDetectFile2Upload -Value '<pre>N/A</pre>'
+                    }
+                    Add-Content -Path tfDriftDetectFile2Upload -Value ("`r`n") -passthru
+                    
+                    # 4. Terraform drift Body
+                    Add-Content -Path tfDriftDetectFile2Upload -Value "<div>"
+                    terraform show tfplan.bin -no-color | tee -a tfplan.bin | % { [System.Text.RegularExpressions.Regex]::Unescape($_) } | out-file tfShowOutputFile -Encoding UTF8
+                    Add-Content -Path tfDriftDetectFile2Upload -Value ('<div style="font-weight:bold;color:#a100ff">4. Terraform drift body</div>') -passthru
+                    Add-Content -Path tfDriftDetectFile2Upload -Value (get-content tfShowOutputFile -raw)
+                    (Get-Content tfDriftDetectFile2Upload).replace('# ', '&#35; ') | Set-Content tfDriftDetectFile2Upload
+                    (Get-Content tfDriftDetectFile2Upload).replace('## ', '&#35;&#35; ') | Set-Content tfDriftDetectFile2Upload
+                    (Get-Content tfDriftDetectFile2Upload).replace('### ', '&#35;&#35;&#35; ') | Set-Content tfDriftDetectFile2Upload
+                    Add-Content -Path tfDriftDetectFile2Upload -Value "</div>"
+
+                    # Upload to build summary
+                    $TFDetectFilePath = "${{ parameters.workingDirectory }}\tfDriftDetectFile2Upload"
+                    echo "##vso[task.addattachment type=Distributedtask.Core.Summary;name=Terraform Drift Detection for ${{ parameters.AwsEnv }};]$TFDetectFilePath"                   
+                    break
+                }
+            }
+          failOnStderr: true # Optional
+          workingDirectory: ${{ parameters.workingDirectory }}
+        env:
+          AWS_ACCESS_KEY: $(NEW_AWS_ACCESS_KEY)
+          AWS_SECRET_KEY: $(NEW_AWS_SECRET_KEY)
+          AWS_ACCESS_KEY_ID : $(NEW_AWS_ACCESS_KEY)
+          AWS_SECRET_ACCESS_KEY : $(NEW_AWS_SECRET_KEY)
+        enabled: true
+
+      - ${{ each step in parameters.additionalPostSteps }}:
+        - ${{ step }}

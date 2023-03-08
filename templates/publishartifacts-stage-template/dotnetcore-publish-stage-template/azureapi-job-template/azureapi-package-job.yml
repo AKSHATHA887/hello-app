@@ -1,0 +1,87 @@
+##############################################################
+################ Package Atrifcats Template ##################
+##############################################################
+parameters:
+- name: DOTNETSDKVERSION
+  default: ''
+- name: CONFIGURATION
+  default: ''
+- name: SOURCE_ARTIFACT
+  default: ''
+- name: SwaggerEndpoint
+  default: 'https://localhost:5001'
+- name: nuGetServiceConnectionName
+  default: ''
+
+steps:
+  - task: UseDotNet@2
+    displayName: Install DotNet SDK
+    inputs:
+      packageType: 'sdk'
+      version: ${{ parameters.DOTNETSDKVERSION }}
+
+  - template: /templates/nuget-common/nuget-authenticate-step.yml@AzurePipelinesTemplateAIR2731
+    parameters:
+      nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+      
+  - task: DotNetCoreCLI@2
+    displayName: Build DotNetCore App
+    inputs:
+      command: build
+      configuration: ${{ parameters.CONFIGURATION }} # Use the variable
+      projects: '**/*.csproj'
+      zipAfterPublish: true
+
+  - task: PowerShell@2
+    displayName: Pull Swagger API Def
+    inputs:
+      targetType: 'inline'
+      script: |
+        
+        # Start a job to run local api in the background
+        $Env:ASPNETCORE_ENVIRONMENT = "Development"
+        Start-Job -Name "RunnWebApi" -ScriptBlock{
+          cd $(System.DefaultWorkingDirectory)/**.WebApi
+          dotnet build
+          dotnet run --urls ${{ parameters.SwaggerEndpoint }}
+        }
+        Receive-Job -Name "RunnWebApi" -Verbose  
+        # Wait for 40 seconds until the api is running            
+        Start-Sleep 40
+        curl ${{ parameters.SwaggerEndpoint }}/swagger/v1/swagger.json --insecure -o $(System.ArtifactsDirectory)/swagger.json
+        
+  - task: PublishBuildArtifacts@1
+    inputs:
+      pathToPublish: '$(Build.ArtifactStagingDirectory)'
+      artifactName: swagger
+              
+  - task: DotNetCoreCLI@2
+    displayName: Publish AzureApI
+    inputs:
+      command: publish
+      publishWebProjects: True
+      arguments: '--configuration $(CONFIGURATION) --output "$(Build.ArtifactStagingDirectory)/${{ parameters.SOURCE_ARTIFACT }}"'
+      zipAfterPublish: True
+
+  # - task: CopyFiles@2
+  #   displayName: 'Copy Files to: $(Build.ArtifactStagingDirectory)'
+  #   inputs:
+  #     SourceFolder: '$(Build.SourcesDirectory)/infra'
+  #     TargetFolder: '$(Build.ArtifactStagingDirectory)/${{ parameters.SOURCE_ARTIFACT }}/infra'
+      
+  
+  - task: ArchiveFiles@2
+    displayName: 'Archive Pipeline Artifact'
+    inputs:
+      rootFolderOrFile: $(Build.ArtifactStagingDirectory)/${{ parameters.SOURCE_ARTIFACT }}
+      includeRootFolder: false
+      archiveFile: $(Build.ArtifactStagingDirectory)/${{ parameters.SOURCE_ARTIFACT }}-$(Build.BuildNumber).zip 
+    enabled: true
+
+  # this code takes all the files in $(Build.ArtifactStagingDirectory) and uploads them as an artifact of your build.
+
+  - task: PublishBuildArtifacts@1
+    displayName: "Publish as artifact"
+    inputs:
+      pathtoPublish: '$(Build.ArtifactStagingDirectory)/${{ parameters.SOURCE_ARTIFACT }}-$(Build.BuildNumber).zip' 
+      artifactName: build-bundle-${{ parameters.SOURCE_ARTIFACT }}

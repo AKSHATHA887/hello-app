@@ -1,0 +1,62 @@
+parameters:
+- name: WARNINGTHRESHOLD
+  default: '50'
+- name: COVERAGETHRESHOLD
+  default: '5'
+- name: vmWindowsImage
+  default: 'windows-latest'
+- name: DOTNETSDKVERSION
+  default: ''
+- name: TF_SRC_PATH
+  default: ''
+- name: VMIMAGE
+  default: ''
+- name: nuGetServiceConnectionName
+  default: ''
+- name: projects
+  default: '**/*.WebApi.csproj'
+
+stages: 
+- stage: code_quality_check
+  displayName: Code Quality Check 
+  jobs:
+  - job: Terraform_Infra_Scan
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}
+    container:
+      image: acr5064.azurecr.io/tf-container-tf12:latest
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    displayName: Terraform IaC Scan
+    steps:
+    - template: terraform_job_template/terraform-iac-scan-job.yml
+      parameters:
+        VMIMAGE: ${{ parameters.VMIMAGE }}
+        TF_SRC_PATH: ${{ parameters.TF_SRC_PATH }}
+  - job: code_analysis
+    displayName: Code Analysis
+    pool:
+      vmImage: ${{ parameters.vmWindowsImage }}
+    steps:
+    - template: dotnetcore-codecheck-job-template/code-analysis-job.yml
+  - job: unit_test
+    displayName: Unit Test
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - template: dotnetcore-codecheck-job-template/unit-test-job.yml
+      parameters:
+        WARNINGTHRESHOLD: ${{ parameters.WARNINGTHRESHOLD }}
+        COVERAGETHRESHOLD: ${{ parameters.COVERAGETHRESHOLD }}
+        DOTNETSDKVERSION: ${{ parameters.DOTNETSDKVERSION }}
+        nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+        
+  - job: code_metrics
+    displayName: Code Metrics
+    pool:
+      vmImage: ${{ parameters.vmWindowsImage }}
+    steps:
+    - template: dotnetcore-codecheck-job-template/code-metrics-job.yml
+      parameters:
+        DOTNETSDKVERSION: ${{ parameters.DOTNETSDKVERSION }} 
+        nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}  
+        projects: ${{ parameters.projects }}

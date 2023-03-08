@@ -1,0 +1,85 @@
+parameters:
+- name: vmImage
+  default: 'ubuntu-latest'
+- name: srcArchiveFolder
+  default: ''
+- name: srcArchiveFile
+  default: ''
+- name: deployInfraTFLayerFolder
+  default: ''
+- name: artifactName
+  default: ''
+- name: nodeJSVer
+  default: 'nodejs12.x'
+  
+stages: 
+- stage: build_publish_artifact
+  displayName: Build NodeJS, package and Publish Artifact
+  jobs:
+  - job: build_publish_artifact
+    displayName: build_publish_artifact
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+      
+    steps:
+    - task: NodeTool@0
+      displayName: 'Use Node ${{ parameters.nodeJSVer }}'
+      inputs:
+        versionSpec: ${{ parameters.nodeJSVer }}
+      enabled: true
+
+    - task: Npm@1
+      displayName: 'Npm Install'
+      inputs:
+        workingDir: ${{ parameters.srcArchiveFolder }}
+        verbose: false
+      enabled: true
+
+    - task: Npm@1
+      displayName: 'Run Test'
+      inputs:
+        command: custom
+        verbose: true
+        customCommand: 'run test'
+      enabled: false
+
+    - task: Npm@1
+      displayName: 'Run Build'
+      inputs:
+        command: custom
+        verbose: false
+        customCommand: 'run build'
+      enabled: false
+
+    - task: PublishCodeCoverageResults@1
+      displayName: 'Publish code coverage from $(System.DefaultWorkingDirectory)/**/*coverage.xml'
+      inputs:
+        codeCoverageTool: Cobertura
+        summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/*coverage.xml'
+        reportDirectory: '$(System.DefaultWorkingDirectory)/**/coverage'
+        failIfCoverageEmpty: true
+      enabled: false
+
+    - task: ArchiveFiles@2
+      displayName: 'Build Pipeline Artifact'
+      inputs:
+        rootFolderOrFile: '${{ parameters.srcArchiveFolder }}'
+        includeRootFolder: false
+        archiveFile: $(build.artifactstagingdirectory)/${{ parameters.srcArchiveFile }}
+      enabled: true
+
+    - bash: |
+       cp $(build.artifactstagingdirectory)/${{ parameters.srcArchiveFile }} $(Build.SourcesDirectory)/${{ parameters.deployInfraTFLayerFolder}}/
+      displayName: 'Copy archived source file to infra folder'
+      enabled: true
+
+    - task: ArchiveFiles@2
+      displayName: 'Build Pipeline Artifact'
+      inputs:
+        rootFolderOrFile: $(Build.SourcesDirectory)/infra
+        archiveFile: $(build.artifactstagingdirectory)/${{ parameters.artifactName }}-$(build.buildnumber).zip
+      enabled: true
+
+    - publish: $(build.artifactstagingdirectory)/${{ parameters.artifactName }}-$(build.buildnumber).zip
+      artifact: ${{ parameters.artifactName }}
+      enabled: true

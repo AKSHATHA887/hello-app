@@ -1,0 +1,58 @@
+#############################################################################
+####################### Dotnet Web API Smoke Tests ###########################
+####################### PowerShell Script ###################################
+#############################################################################
+
+parameters:
+  - name: PATHTOPROJECT
+    default: '**/*.WebApi.csproj'
+  - name: STARTUPSLEEPTIME
+    default: 30
+  - name: CONFIGURATION
+    default: Debug
+  - name: APPLICATIONURL
+    default: https://localhost:5001
+steps: 
+- task: PowerShell@2
+  displayName: 'Dotnet Web API Smoke Test'
+  enabled: true
+  inputs:
+    targetType: 'inline'
+    script: |
+        # Start a job to run local api in the background
+        Start-Job -Name "AzSmokeTest" -ScriptBlock{
+            dotnet run -c ${{ parameters.CONFIGURATION }} --project ${{ parameters.PATHTOPROJECT }} --urls ${{ parameters.APPLICATIONURL }}
+        }
+        
+         Write-Host "Path"
+          Write-Host ${{ parameters.PATHTOPROJECT }}
+          Write-Host "StartupSleepTime"
+          Write-Host ${{ parameters.STARTUPSLEEPTIME }}
+          Write-Host "ApplicationUrl"
+          Write-Host ${{ parameters.APPLICATIONURL }}
+          Write-Host "Configuration"
+          Write-Host ${{ parameters.CONFIGURATION }}
+          
+        Receive-Job -Name "AzSmokeTest" -Verbose  
+        # Wait for 30 seconds until the api is running            
+        Start-Sleep ${{ parameters.STARTUPSLEEPTIME }}
+
+        # set a default (differing) status code
+        $statusCode=200
+        try
+        {
+          $response = Invoke-WebRequest -Uri ${{ parameters.APPLICATIONURL }}/health -SkipCertificateCheck
+        }
+        catch
+        {
+           # catch & read the current statusCode
+           $statusCode =  $_.Exception.Response | Select-Object -ExpandProperty StatusCode
+        }
+        finally
+        {
+          if($statusCode -ne 200)
+          {
+            Write-Error "Dotnet Smoke test failed with StatusCode:$statusCode"
+            exit 1;
+          }
+        }

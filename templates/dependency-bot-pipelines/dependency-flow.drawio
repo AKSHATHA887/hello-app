@@ -1,0 +1,130 @@
+<mxfile host="65bd71144e">
+    <diagram id="nwXuFeoYiu_5bKOYol4s" name="Page-1">
+        <mxGraphModel dx="956" dy="933" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="24" value="" style="rounded=0;whiteSpace=wrap;html=1;glass=0;sketch=1;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="90" width="750" height="720" as="geometry"/>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" target="sidCOGnt6xOXBVu8zgmt-6" edge="1" source="7">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="90" y="340" as="sourcePoint"/>
+                        <Array as="points">
+                            <mxPoint x="190" y="260"/>
+                            <mxPoint x="113" y="260"/>
+                            <mxPoint x="113" y="340"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="sidCOGnt6xOXBVu8zgmt-6" target="sidCOGnt6xOXBVu8zgmt-7" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-6" value="checkout branch&amp;nbsp;" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;sketch=1;" parent="1" vertex="1">
+                    <mxGeometry x="133" y="310" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="sidCOGnt6xOXBVu8zgmt-7" target="10" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-7" value="update" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;sketch=1;" parent="1" vertex="1">
+                    <mxGeometry x="287" y="310" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-17" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="sidCOGnt6xOXBVu8zgmt-8" target="sidCOGnt6xOXBVu8zgmt-16" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-8" value="create PR" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;sketch=1;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="580" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="27" value="" style="edgeStyle=none;html=1;" edge="1" parent="1" source="sidCOGnt6xOXBVu8zgmt-16" target="26">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-16" value="Set Vote&amp;nbsp;&amp;nbsp;" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;sketch=1;" parent="1" vertex="1">
+                    <mxGeometry x="570" y="580" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-12" value="parameter:&lt;br&gt;&lt;div&gt;&lt;span&gt;&amp;nbsp;&lt;/span&gt;&lt;span style=&quot;font-family: &amp;#34;menlo&amp;#34; , &amp;#34;monaco&amp;#34; , &amp;#34;courier new&amp;#34; , monospace&quot;&gt;source_branch&lt;/span&gt;&lt;/div&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+                    <mxGeometry x="133" y="400" width="120" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-13" value="parameter:&amp;nbsp;&lt;br&gt;azure_devops_project&lt;br&gt;&lt;div style=&quot;line-height: 18px&quot;&gt;azure_devops_organization&lt;/div&gt;&lt;div style=&quot;line-height: 18px&quot;&gt;&lt;div style=&quot;line-height: 18px&quot;&gt;azure_devops_repository&lt;/div&gt;&lt;div style=&quot;line-height: 18px&quot;&gt;&lt;div style=&quot;line-height: 18px&quot;&gt;azure_devops_organization&lt;br&gt;source_branch&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+                    <mxGeometry x="380" y="670" width="120" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-15" value="for NPM this runs update and audit fix&lt;br&gt;&lt;br&gt;for tf this checks upstream registry&lt;br&gt;&lt;br&gt;for submodule this runs submodule update" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+                    <mxGeometry x="287" y="400" width="123" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="sidCOGnt6xOXBVu8zgmt-18" value="Provides an initial &quot;Approve&quot; vote on PR" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+                    <mxGeometry x="570" y="670" width="120" height="35" as="geometry"/>
+                </mxCell>
+                <mxCell id="4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="2" target="3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="2" value="delete old branches under /bot/dependency" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;sketch=1;" parent="1" vertex="1">
+                    <mxGeometry x="440" y="160" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="3" value="abandon old PRs created previously by this bot" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;sketch=1;" parent="1" vertex="1">
+                    <mxGeometry x="630" y="160" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="7" target="2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="7" value="&lt;span style=&quot;text-align: left&quot;&gt;parameter:&lt;/span&gt;&lt;div style=&quot;line-height: 18px&quot;&gt;delete_previous_bot_prs_branches&lt;/div&gt;" style="rhombus;whiteSpace=wrap;html=1;sketch=1;" parent="1" vertex="1">
+                    <mxGeometry x="130" y="135" width="120" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="15" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" parent="1" source="20" target="11" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="150" y="540" as="targetPoint"/>
+                        <Array as="points">
+                            <mxPoint x="800" y="330"/>
+                            <mxPoint x="800" y="540"/>
+                            <mxPoint x="190" y="540"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="21" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;" parent="1" source="10" target="20" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="29" value="Yes" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="21">
+                    <mxGeometry x="0.2333" y="3" relative="1" as="geometry">
+                        <mxPoint x="-15" y="-7" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="28" value="" style="edgeStyle=none;html=1;" edge="1" parent="1" source="10" target="25">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="10" value="&lt;div style=&quot;line-height: 18px&quot;&gt;updates found&lt;/div&gt;" style="rhombus;whiteSpace=wrap;html=1;sketch=1;" parent="1" vertex="1">
+                    <mxGeometry x="470" y="285" width="120" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="12" value="" style="edgeStyle=none;html=1;" parent="1" source="11" target="sidCOGnt6xOXBVu8zgmt-8" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="11" value="Create Bug" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;sketch=1;" parent="1" vertex="1">
+                    <mxGeometry x="130" y="580" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="13" value="parameter:&amp;nbsp;&lt;br&gt;&lt;div style=&quot;line-height: 18px&quot;&gt;azure_devops_area&lt;/div&gt;&lt;div style=&quot;line-height: 18px&quot;&gt;&lt;div style=&quot;line-height: 18px&quot;&gt;required_bug_fields_for_process_template&lt;/div&gt;&lt;/div&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+                    <mxGeometry x="133" y="660" width="120" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="18" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" parent="1" source="3" target="sidCOGnt6xOXBVu8zgmt-6" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="620" y="350" as="sourcePoint"/>
+                        <mxPoint x="320" y="590" as="targetPoint"/>
+                        <Array as="points">
+                            <mxPoint x="790" y="190"/>
+                            <mxPoint x="790" y="270"/>
+                            <mxPoint x="193" y="270"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="20" value="Create New Branch" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;sketch=1;" parent="1" vertex="1">
+                    <mxGeometry x="630" y="310" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="22" value="parameter:&lt;br&gt;&lt;div&gt;&lt;span&gt;&amp;nbsp;&lt;/span&gt;azure_devops_team_name&lt;br&gt;&amp;nbsp; (used to find current iteration)&lt;/div&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;" parent="1" vertex="1">
+                    <mxGeometry x="630" y="390" width="170" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="25" value="end" style="ellipse;whiteSpace=wrap;html=1;rounded=0;glass=0;sketch=1;" vertex="1" parent="1">
+                    <mxGeometry x="485" y="420" width="90" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="26" value="end" style="ellipse;whiteSpace=wrap;html=1;rounded=0;glass=0;sketch=1;" vertex="1" parent="1">
+                    <mxGeometry x="730" y="585" width="90" height="50" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

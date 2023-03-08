@@ -1,0 +1,62 @@
+##############################################################
+################ Swagger Atrifcats Template ##################
+##############################################################
+parameters:
+- name: DOTNETSDKVERSION
+  default: ''
+- name: CONFIGURATION
+  default: ''
+- name: SwaggerEndpoint
+  default: 'https://localhost:5001'
+- name: WEBAPIS
+  default: 'No'
+- name: nuGetServiceConnectionName
+  default: ''  
+
+steps:
+  - task: UseDotNet@2
+    displayName: Install DotNet SDK
+    inputs:
+      packageType: 'sdk'
+      version: ${{ parameters.DOTNETSDKVERSION }}
+
+  - template: /templates/nuget-common/nuget-authenticate-step.yml@AzurePipelinesTemplateAIR2731
+    parameters:
+      nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+      
+  - task: DotNetCoreCLI@2
+    displayName: Build DotNetCore App
+    inputs:
+      command: build
+      configuration: ${{ parameters.CONFIGURATION }} # Use the variable
+      projects: '**/*.csproj'
+      zipAfterPublish: true
+
+  - task: PowerShell@2
+    displayName: Pull Swagger API Def
+    inputs:
+      targetType: 'inline'
+      script: |
+        
+        # Start a job to run local api in the background
+        $Env:ASPNETCORE_ENVIRONMENT = "Development"
+        Start-Job -Name "RunnWebApi" -ScriptBlock{
+          cd $(System.DefaultWorkingDirectory)/**.WebApi
+          dotnet build
+          dotnet run --urls ${{ parameters.SwaggerEndpoint }}
+        }
+        Receive-Job -Name "RunnWebApi" -Verbose  
+        # Wait for 40 seconds until the api is running            
+        Start-Sleep 40
+        curl ${{ parameters.SwaggerEndpoint }}/swagger/v1/swagger.json --insecure -o $(System.ArtifactsDirectory)/swagger.json
+        
+  - task: PublishBuildArtifacts@1
+    inputs:
+      pathToPublish: '$(Build.ArtifactStagingDirectory)'
+      artifactName: swagger
+
+  - task: CIODevOps.publish-swagger.custom-swagger-endpoints-task.publish-swagger@0
+    displayName: 'Publish Swagger'
+    enabled: true
+    inputs:
+      WEBAPIS: ${{ parameters.WEBAPIS }}

@@ -1,0 +1,57 @@
+parameters:
+- name: startupSleepTime
+  default: 30  
+- name: azfuncDefaultPort
+  default: '7071'
+- name: nodeJSVer
+  default: '10.x'
+
+jobs:
+  - job: "smoke_test"
+    displayName: "smoke test"
+    steps:   
+    - template: /templates/common-step-template/nodejs-install-build-step.yml@AzurePipelinesTemplateAIR2731
+      parameters:
+        nodeJSVer: ${{ parameters.nodeJSVer }} 
+
+    - task: PowerShell@2
+      displayName: "Run function locally and check response status code"
+      enabled: true
+      inputs:
+        targetType: "inline"
+        script: |
+          Write-Host "start function in backgroud thread"
+          Start-Job -Name "AzFuncSmokeTest" -ScriptBlock{ npm run start --if-present}
+
+          Write-Host "check heatbeart response status"
+          # create health endpoint
+          $uri =  "http://localhost:${{ parameters.azfuncDefaultPort }}/api/heartbeat"
+          # sleep for some seconds for startup
+          Start-Sleep ${{ parameters.startupSleepTime }}
+
+          $statusCode=200
+          try
+          {
+            Write-Host $uri
+            # invoke the endpoint. Expect to get 200
+            $response = Invoke-WebRequest -Uri $uri -SkipCertificateCheck
+            Write-Host $response
+            Write-Host $error[0].Exception.Message
+          }
+          catch
+          {
+            # catch & read the current statusCode
+            $statusCode =  $_.Exception.Response | Select-Object -ExpandProperty StatusCode
+            Write-Host "catch"
+            Write-Host $error[0].Exception.Message
+          }
+          finally
+          {
+            if($statusCode -ne 200)
+            {
+              Write-Host $error[0].Exception.Message
+              Write-Error "Azure function smoke test failed with StatusCode:$statusCode"
+              exit 1;
+            }
+            Stop-Job -Name "AzFuncSmokeTest"
+          }

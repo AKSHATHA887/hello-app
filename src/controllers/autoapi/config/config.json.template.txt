@@ -1,0 +1,25 @@
+{
+    "project": {
+        "air_id": #{PROJECT_AIRID}#, // e.g.: 9403
+        "name": "#{PROJECT_AIRID}#" // e.g.: MyProject
+    },
+    "api": {
+        "base_url": "#{API_BASE_URL}#" // e.g.: http://localhost:3000/api
+    },
+    "datasource": {
+        "type": "#{DATASOURCE_TYPE}#", // Currently supported options: bigquery 
+        "properties": {
+            "project_id": "#{DATASOURCE_PROJECT_ID}#", // e.g.: sbx-9403-sample-adfsrc
+            "dataset_id": "#{DATASOURCE_DATASET_ID}#", // e.g.: sample_dataset
+            "path_to_keyfile": "#{DATASOURCE_PATH_TO_KEYFILE}#", // e.g.: C:/Users/appuser/credentials/key_file.json
+        },
+        "schema": {
+            "tables": {
+                "example_table": {
+                    "primary_key": "example_key_name", // used to look up entity by id (e.g.: /api/example_table('1234')) 
+                    "default_orderby": "example_timestamp_field desc" // used to select current version of record for entity by id request
+                }
+            }
+        }
+    }
+}

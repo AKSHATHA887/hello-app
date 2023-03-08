@@ -1,0 +1,44 @@
+parameters:
+- name: stageName
+  default: ''
+- name: variableGroupName
+  type: string
+- name: variableName
+  type: string
+- name: variableValue
+  type: string
+- name: isSecret
+  default: 'false'
+- name: AzureDevOpsOrg
+  default: ''
+- name: AzureDevOpsProjectID
+  default: ''
+- name: AzureDevOpsPAT
+  type: string
+- name: dependsOn
+  type: object
+  default: 
+    - PREVIOUS 
+- name: condition
+  default: ''
+
+stages: 
+- stage: ${{ parameters.stageName }}
+  ${{ if and(ne(parameters.dependsOn, ''), ne(join(';',parameters.dependsOn), 'PREVIOUS')) }}:
+    dependsOn: ${{ parameters.dependsOn }}
+  ${{ if ne(parameters.condition, '') }}:
+    condition: ${{ parameters.condition }}
+  displayName: Update Variable in AzureDevOps Variable Group
+  jobs:
+  - job: ${{ parameters.stageName }}
+    displayName: Update Variable in AzureDevOps Variable Group
+    steps:
+    - template: azuredevops-all-step-template/update-variable-in-azdo-varaible-group-step.yml
+      parameters:
+        variableGroupName: ${{ parameters.variableGroupName }}
+        variableName: ${{ parameters.variableName }}
+        variableValue: ${{ parameters.variableValue }}
+        isSecret: ${{ parameters.isSecret }}
+        AzureDevOpsOrg: ${{ parameters.AzureDevOpsOrg }}
+        AzureDevOpsProjectID: ${{ parameters.AzureDevOpsProjectID }}
+        AzureDevOpsPAT: ${{ parameters.AzureDevOpsPAT }}

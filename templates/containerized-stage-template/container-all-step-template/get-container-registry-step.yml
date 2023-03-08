@@ -1,0 +1,70 @@
+parameters:
+# Mandatory Parameters
+- name: destinationContainerRegistry
+  default: ''
+- name: dockerRegistry
+  default: ''
+- name: dockerImgTag
+  default: ''
+- name: identifier
+  default: ''
+
+steps:
+- task: Powershell@2
+  displayName: 'Get Registry from ${{ parameters.identifier }} dockerImgTag'
+  name: get_registry_step_${{ parameters.identifier }}
+  continueOnError: false
+  timeoutInMinutes: 60
+  inputs:
+    targetType: inline
+    script: |
+      $destinationContainerRegistry = "${{ parameters.destinationContainerRegistry }}"
+      $dockerRegistry = "${{ parameters.dockerRegistry }}"
+      $dockerImgTag = "${{ parameters.dockerImgTag }}"
+      Write-Host "[Info] destinationContainerRegistry is $destinationContainerRegistry"
+      Write-Host "[Info] dockerRegistry is $dockerRegistry"
+      Write-Host "[Info] dockerImgTag is $dockerImgTag"
+      
+      if (-not [string]::IsNullOrEmpty($dockerRegistry)){
+        $getRegistryFrom = $dockerRegistry
+      }
+      if (-not [string]::IsNullOrEmpty($dockerImgTag)){
+        $getRegistryFrom = $dockerImgTag
+      }
+      Write-Host "[Debug] getRegistryFrom is $getRegistryFrom"
+
+      if (-not [string]::IsNullOrEmpty($getRegistryFrom)){
+        switch($destinationContainerRegistry)
+        {
+          "GCR" { 
+            $dockerRegistry = $getRegistryFrom.Split("/")[0]
+          }
+          "ECR" {
+            $dockerRegistry = $getRegistryFrom.Split("/")[0]
+            ## AWS Bridge Dev
+            #if ($dockerRegistry.Contains("314974120466")) {
+            #  $dockerRegistry = "us-east-1.amazonaws.com_dev"
+            ## AWS Bridge Stg
+            #} elseif ($dockerRegistry.Contains("340231329392")) {
+            #  $dockerRegistry = "us-east-1.amazonaws.com_stage"
+            ## AWS Bridge Prd
+            #} elseif ($dockerRegistry.Contains("505692215635")) {
+            #  $dockerRegistry = "us-east-1.amazonaws.com_prod"
+            #}
+          }
+          "ACR" { 
+            $dockerRegistry =  ($getRegistryFrom -Split ".azurecr.io")[0]
+          }
+          "Others" { 
+            Write-Error "dockerRegistry is empty due to Other type of destination container registry"
+          }
+        }
+
+        Write-Host "[Debug] dockerRegistry is $dockerRegistry"
+        # Set as outputs
+        Write-Host "##vso[task.setvariable variable=APP_DOCKER_REGISTRY;isSecret=false;isOutput=true;]$dockerRegistry"
+      } else {
+        Write-Error "Invalid dockerRegistry"
+      }
+    failOnStderr: true
+  enabled: true

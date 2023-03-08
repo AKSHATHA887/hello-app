@@ -1,0 +1,58 @@
+parameters:
+  azureDevOpsEnvironment: ''
+  promoteFromContainerRegistry: ''
+  promoteFromDockerImgPathToGCR: ''
+  promoteToContaienrRegistry: ''
+  promoteToDockerImgPathToGCR: ''
+  dependsOn: ''
+  condition: ''
+
+stages:
+- stage: 'Promote Image to ${{ parameters.promoteToContaienrRegistry }} '
+  ${{ if ne(parameters.dependsOn, '') }}:
+    dependsOn: ${{ parameters.dependsOn }}
+  ${{ if ne(parameters.condition, '') }}:
+    condition: ${{ parameters.condition }}
+  jobs:
+  - deployment: Promote_container_image
+    displayName: Promote Container Image
+    pool:
+      name: Azure Pipelines
+      vmImage: ubuntu-latest
+#    variables:
+#    - group: ${{ parameters.promote_from_variableGroup }}
+#    - group: ${{ parameters.promote_to_variableGroup }}
+    container:
+      image: acr5064.azurecr.io/tf-consume-job-container-tf12:latest
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    environment: ${{ parameters.azureDevOpsEnvironment }}
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: Docker@2
+            displayName: Login to GCR ${{ parameters.promoteFromContainerRegistry }}
+            inputs:
+              containerRegistry: ${{ parameters.promoteFromContainerRegistry }}
+              command: 'login'
+          - bash: |
+              docker pull ${{ parameters.promoteFromDockerImgPathToGCR }}
+          - task: Docker@2
+            displayName: Logout from GCR ${{ parameters.promoteFromContainerRegistry }}
+            inputs:
+              containerRegistry: ${{ parameters.promoteFromContainerRegistry }}
+              command: 'logout'
+
+          - task: Docker@2
+            displayName: Login to GCR ${{ parameters.promoteToContaienrRegistry }}
+            inputs:
+              containerRegistry: ${{ parameters.promoteToContaienrRegistry }}
+              command: 'login'
+          - bash: |
+              docker tag ${{ parameters.promoteFromDockerImgPathToGCR }} ${{ parameters.promoteToDockerImgPathToGCR }}
+              docker push ${{ parameters.promoteToDockerImgPathToGCR }}
+          - task: Docker@2
+            displayName: Logout from GCR ${{ parameters.promoteToContaienrRegistry }}
+            inputs:
+              containerRegistry: ${{ parameters.promoteToContaienrRegistry }}
+              command: 'logout'

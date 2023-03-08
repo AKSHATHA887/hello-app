@@ -1,0 +1,106 @@
+parameters:
+- name: vmImage
+  default: ''
+- name: deployInfraTFLayerFolder
+  default: ''
+- name: asapProjectId
+  default: ''
+- name: airId
+  default: ''
+
+stages: 
+- stage: IaC_Compliance
+  jobs:     
+  - job: IaC_Compliance
+    displayName: 'Terraform Infra Scan'
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    container:
+      image: acr5064.azurecr.io/tf-consume-job-container-infoblox-tf12:latest
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    steps:
+    - task: CIODevOps.http-security-headers-build-release-task.custom-build-release-task.CheckHTTPSecurityHeader@1
+      displayName: 'CheckHTTPSecurityHeader'
+      enabled: true
+    - ${{ if ne(parameters.airId, '') }}:
+      - task: CIODevOps.asapsecurityscan-build-release-task.custom-build-release-task.ASAPSecurityScanTask@0
+        displayName: ASAPSecurityScanTask
+        inputs:
+          air_id: ${{ parameters.airId }}
+        enabled: false
+    - task: Powershell@2
+      displayName: Terraform Format
+      name: tf_fmt
+      continueOnError: false
+      timeoutInMinutes: 2  
+      inputs:
+        targetType: inline
+        script: |
+          cd ${{ parameters.deployInfraTFLayerFolder}}
+          $cmdArgs = @(
+              "fmt"
+              "--diff=true"
+              "-check=true"
+              "./"
+            )
+          terraform $cmdArgs
+        failOnStderr: true # Optional
+      enabled: true
+
+    - task: CIODevOps.azuredevOps-build-agent-cf-cli-config-file-generator.custom-build-release-task.AzureDevOps Build Agent TF Cli Config File Generator@0
+      displayName: 'AzureDevOps Build Agent TF Cli Config File Generator'
+      enabled: true
+
+    - task: PowerShell@2
+      name: compliance_test
+      displayName: 'Terraform Compliance Test'
+      inputs:
+        targetType: inline
+        script: |
+          Install-Module -Name Pester -Force -Verbose -Scope CurrentUser -RequiredVersion 4.10.1
+
+          # Execute Pester Test, write results as NUnit to publish into the build
+          Get-ChildItem /sharedfolder/test
+          $result = Invoke-Pester -Script (Join-Path "/sharedfolder/test" "moduleconsume-tf12.ps1") `
+            -OutputFormat 'NUnitXML' -OutputFile (Join-Path $Env:COMMON_TESTRESULTSDIRECTORY 'workspace.parameters.tests.xml') `
+            -PassThru
+          $result.TestResult | Where-Object { $_.Result -eq 'Failed' -or $_.Result -eq 'Pending' } | ForEach-Object {
+            $test = $_
+            switch ($test.Result) {
+              'Failed' {
+                $msg = "$($test.Describe) | $($test.Context) | $($test.Name) | $($test.FailureMessage)"
+                $line = ""
+                $file = ""
+                if ($test.StackTrace -Match '<ScriptBlock>,\s*(?<file>.+(?<=\.ps1)):\s*line\s*(?<line>\d+)') {
+                  $line = $Matches.line
+                  $file = $Matches.file
+                }
+                Write-Error "Compliance tests failed : $msg"
+                break;
+              }
+              'Pending' {
+                $msg = "$($test.Describe) | $($test.Context) | $($test.Name) : Is Pending Implementation"
+                Write-Warning "Compliance tests has few warning : $msg" 
+                break;
+              }
+            }
+          }
+          if ($result.FailedCount -gt 0) {
+            exit $result.FailedCount
+          }
+      enabled: true
+
+    - task: CIODevOps.cloud2-tfmod-consume-build-release-task.custom-build-release-task.Cloud2.0 Terraform Module Promote Assistant@0
+      displayName: 'Cloud Terraform Module Promote Scan'
+      enabled: true
+
+    - task: PublishTestResults@2
+      condition: succeededOrFailed()
+      name: publish_compliance_results
+      displayName: Publish Compliance Test Result
+      inputs:
+        testResultsFormat: NUnit
+        testResultsFiles: "*.xml"
+        testRunTitle: "Compliance Test"
+        searchFolder: $(Common.TestResultsDirectory)
+      enabled: true

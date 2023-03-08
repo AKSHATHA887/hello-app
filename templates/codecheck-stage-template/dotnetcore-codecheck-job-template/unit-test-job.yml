@@ -1,0 +1,56 @@
+parameters:
+- name: DOTNETSDKVERSION  # defaults for any parameters that aren't specified
+  default: ''
+- name: CONFIGURATION
+  default: ''
+- name: WARNINGTHRESHOLD
+  default: ''
+- name: COVERAGETHRESHOLD
+  default: ''
+- name: nuGetServiceConnectionName
+  default: ''  
+
+steps:
+  - task: UseDotNet@2
+    inputs:
+      packageType: sdk
+      version: ${{ parameters.DOTNETSDKVERSION }}
+    displayName: Install DotNet SDK
+
+  - template: /templates/nuget-common/nuget-authenticate-step.yml@AzurePipelinesTemplateAIR2731
+    parameters:
+      nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+
+  - task: DotNetCoreCLI@2
+    enabled: true
+    displayName: Unit Tests
+    inputs:
+      command: test
+      projects: '**/*.UnitTests.csproj'
+      arguments: >-
+        /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura
+        /p:RunCodeAnalysis=true
+      publishTestResults: true
+
+  - task: PublishCodeCoverageResults@1
+    displayName: Publish Code Coverage
+    enabled: true
+    inputs:
+      codeCoverageTool: Cobertura
+      summaryFileLocation: >-
+        $(System.DefaultWorkingDirectory)/**/*.UnitTests/coverage.cobertura.xml
+      reportDirectory: $(System.DefaultWorkingDirectory)/coverage
+
+  - task: BuildQualityChecks@6
+    displayName: Code Coverage Policy
+    enabled: true
+    inputs:
+      checkWarnings: true
+      warningFailOption: fixed
+      warningThreshold: ${{ parameters.WARNINGTHRESHOLD }}
+      showStatistics: true
+      checkCoverage: true
+      coverageFailOption: fixed
+      coverageType: lines
+      coverageThreshold: ${{ parameters.COVERAGETHRESHOLD }}
+      configuration: ${{ parameters.CONFIGURATION }}

@@ -1,0 +1,237 @@
+parameters: 
+- name: awsEnvName
+  default: ''
+- name: vmImage
+  default: ''
+- name: dockerFilePath
+  default: ''
+- name: dockerImgTag
+  default: ''
+- name: dockerRegistry
+  default: ''
+- name: azureDevOpsVarGroups
+  type: object
+  default: []
+- name: acnCIOACRDockerRegistry
+  default: 'acncio.azurecr.io Read'
+- name: aquaScannerImg
+  default: 'acncio.azurecr.io/aqua-scanner:latest'
+- name: aquaMgmtConsoleConn
+  default: 'Aqua Prod Console'
+- name: dockerLabels
+  type: object
+  default: []
+- name: updVarInAzDoVarGroup
+  type: boolean
+  default: false
+- name: variableGroupName
+  default: ''
+- name: variableName
+  default: ''
+- name: variableValue
+  default: ''
+- name: isSecret
+  type: boolean
+  default: false
+- name: AzureDevOpsOrg
+  default: ''
+- name: AzureDevOpsProjectID
+  default: ''
+- name: AzureDevOpsPAT
+  default: ''
+- name: dockerBuildAdditionalPreSteps
+  type: stepList
+  default: []
+
+stages: 
+- stage: 'Scan_Aqua_Build_Push_ECR_${{ parameters.awsEnvName }}'
+  displayName: 'Build Scan and Push to ECR ${{ parameters.awsEnvName }}'
+  variables:
+  - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+      - group: ${{variableGroup}}
+  jobs:
+  - job: Scan_Aqua_Build_Push_ECR
+    displayName: Build Scan and Push to ECR ${{ parameters.awsEnvName }}
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    container:
+      image: acr5064.azurecr.io/tf-container-aws-ubuntu1904:latest
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    steps:
+    - ${{ each step in parameters.dockerBuildAdditionalPreSteps }}:
+      - ${{ step }}
+    - task: Powershell@2
+      displayName: 'Get Registry from dockerImgTag'
+      name: get_registry_from_dockerImgTag
+      continueOnError: false
+      timeoutInMinutes: 60
+      inputs:
+        targetType: inline
+        script: |
+          $dockerImgTag = "${{ parameters.dockerImgTag }}"
+          Write-Host "[Info] dockerImgTag is $dockerImgTag"
+          
+          if (-not [string]::IsNullOrEmpty($dockerImgTag)){
+            $dockerRegistry = $dockerImgTag.Split("/")[0]
+            Write-Host "[Debug] dockerRegistry is $dockerRegistry"
+            # Set as outputs
+            Write-Host "##vso[task.setvariable variable=APP_DOCKER_REGISTRY;isSecret=false;isOutput=true;]$dockerRegistry"
+          } else {
+            Write-Error "Invalid dockerImgTag ${{ parameters.dockerImgTag }}"
+          }
+        failOnStderr: true
+      enabled: true
+
+    # Login into ACR to download the aqua scanner
+    - task: Docker@2
+      displayName: Login to ACN CIO ACR
+      inputs:
+        containerRegistry: ${{ parameters.acnCIOACRDockerRegistry }}
+        command: 'login'
+      enabled: true
+
+    # Build application docker image
+    - task: Powershell@2
+      displayName: Build Docker Image
+      name: build_docker_image
+      continueOnError: false
+      timeoutInMinutes: 60
+      inputs:
+        targetType: inline
+        script: |
+          $dockerRegistry = "$(get_registry_from_dockerImgTag.APP_DOCKER_REGISTRY)"
+          Write-Host "[Debug] dockerRegistry is $dockerRegistry" 
+
+          $cmdArgs = @(
+              "build"
+              "--no-cache"
+              "-f"
+              "`"${{ parameters.dockerFilePath }}`""
+              "-t"
+              "`"${{ parameters.dockerImgTag }}`""
+          )
+
+          Write-Host "[Debug] Initial cmdArgs is $cmdArgs"
+          
+          # Handle docker labels
+          $dockerLabels = "${{ join(';', parameters.dockerLabels) }}"
+          Write-Host "[Info] dockerLabels is $dockerLabels"
+          if (![string]::IsNullOrEmpty($dockerLabels)) {
+              $dockerLabels.Split(";") | ForEach {
+                if (![string]::IsNullOrEmpty($_)) {
+                  $label = @(
+                      "--label"
+                      "`"$_`""
+                  )
+                  $cmdArgs += $label
+                }
+              }
+          } else {
+            Write-Host "[Info] dockerLabels is empty"
+          }
+
+          Write-Host "[Debug] cmdArgs with custom docker labels is $cmdArgs"
+
+          $defaultLabel = @(
+              "--label"
+              "`"com.accenture.cio.image.name=${{ parameters.dockerImgTag }}`""
+          )
+          $cmdArgs += $defaultLabel
+
+          Write-Host "[Debug] cmdArgs with default docker labels is $cmdArgs"
+
+          $dockerBuildPath = @(".")
+          $cmdArgs += $dockerBuildPath
+
+          Write-Host "[Debug] cmdArgs is $cmdArgs"
+
+          docker $cmdArgs
+        failOnStderr: true
+      enabled: true
+    
+    # Aqua Init
+    - script: |
+            docker build -t ${{ parameters.dockerImgTag }} -f- . <<EOF
+            FROM ${{ parameters.dockerImgTag }}
+            USER root:root
+            RUN /microenforcer aqua-init
+            USER appuser:appgroup
+            EOF
+      displayName: 'Aqua-Init'
+
+    # Pull Common Aqua Scanner docker image
+    - script: docker pull ${{ parameters.aquaScannerImg }}
+      displayName: 'Get Aqua Scanner Image'
+      enabled: true
+
+    # Scan with Aqua
+    - task: aquasecScanner@4
+      displayName: Aqua Scanning Image ${{ parameters.dockerImgTag }}
+      target: host
+      inputs:
+        image: ${{ parameters.dockerImgTag }}
+        scanType: 'local'
+        customFlags: '--direct-cc'
+        registerCompliant: true
+        scanner: ${{ parameters.aquaScannerImg }}
+        registry: $(get_registry_from_dockerImgTag.APP_DOCKER_REGISTRY)
+        connection: ${{ parameters.aquaMgmtConsoleConn }}
+      enabled: true
+
+    # Logout from ACR
+    - task: Docker@2
+      displayName: Logout from ACN CIO ACR
+      inputs:
+        containerRegistry: ${{ parameters.acnCIOACRDockerRegistry }}
+        command: 'logout'
+      enabled: true
+
+    # Login ECR
+    - task: Powershell@2
+      displayName: Login ECR
+      name: Assume_Role
+      continueOnError: false
+      timeoutInMinutes: 2
+      inputs:
+        targetType: inline
+        script: |
+          Get-ChildItem
+          $scriptDir = "/sharedfolder/test"
+          $HashtablePath  = Join-Path -Path $scriptDir -ChildPath \hashtable.ps1
+          . $HashtablePath
+          Write-Host "[Debug] NEW_APP_TEAM_DEPLOYER_ROLE is $($Env:NEW_APP_TEAM_DEPLOYER_ROLE)"
+          $awscred = aws sts assume-role --role-arn $Env:NEW_APP_TEAM_DEPLOYER_ROLE --role-session-name aws-bridge-access-assume-$(Build.BuildNumber)
+          $hashawscred = $awscred | ConvertFrom-Json | ConvertTo-HashtableFromJson
+          $Env:AWS_ACCESS_KEY_ID = $hashawscred.Credentials.AccessKeyId
+          $Env:AWS_SECRET_ACCESS_KEY = $hashawscred.Credentials.SecretAccessKey
+          $Env:AWS_SESSION_TOKEN = $hashawscred.Credentials.SessionToken
+          $Env:AWS_DEFAULT_REGION = $Env:AWS_REGION
+          $authInfo = aws ecr get-authorization-token --registry-ids $Env:AWS_ACCOUNT_ID | ConvertFrom-Json | ConvertTo-HashtableFromJson
+          $authorizationToken = $authInfo.authorizationData.authorizationToken
+          $Env:_DOCKER_REPO="$(aws ecr get-authorization-token --output text  --query 'authorizationData[].proxyEndpoint')"
+          Write-Host "[Info] proxyEndpoint is $($Env:_DOCKER_REPO)"
+          aws ecr get-login --no-include-email --region $Env:AWS_REGION | awk '{print $6}' | docker login -u AWS --password-stdin $Env:_DOCKER_REPO
+        failOnStderr: true # Optional
+      env:
+        AWS_ACCESS_KEY_ID: $(NEW_AWS_ACCESS_KEY)
+        AWS_SECRET_ACCESS_KEY: $(NEW_AWS_SECRET_KEY) 
+        AWS_REGION: $(AWS_REGION)
+        AWS_ACCOUNT_ID: $(AWS_ACCOUNT_ID)
+      enabled: true
+
+    # Push our image into ECR
+    - script: docker push ${{ parameters.dockerImgTag }}
+      displayName: 'Push ${{ parameters.dockerImgTag }} image'
+      enabled: true
+    
+    # Update variable in variable group
+    - ${{ if eq(parameters.updVarInAzDoVarGroup, true) }}:
+      - template: update-variable-in-azdo-varaible-group.yml
+        parameters:
+          variableGroupName: ${{ parameters.variableGroupName }}
+          variableName: ${{ parameters.variableName }}
+          variableValue: ${{ parameters.variableValue }}
+          isSecret: ${{ parameters.isSecret }}
+          AzureDevOpsOrg: ${{ parameters.AzureDevOpsOrg }}
+          AzureDevOpsProjectID: ${{ parameters.AzureDevOpsProjectID }}
+          AzureDevOpsPAT: ${{ parameters.AzureDevOpsPAT }}

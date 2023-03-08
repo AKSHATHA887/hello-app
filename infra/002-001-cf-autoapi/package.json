@@ -1,0 +1,19 @@
+{
+  "name": "sample-cf-helloworld",
+  "version": "1.0.0",
+  "description": "Packaged externals for GCP cloud function sample cloud function helloworld ",
+  "private": true,
+  "scripts": {},
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.16.3",
+    "moment": "^2.22.2",
+    "request": "^2.88.0",
+    "uuid": "^3.3.2",
+    "google-gax": "^1.1.1",
+    "grpc": "^1.20.3",
+    "node-pre-gyp": "^0.13.0",
+    "busboy": "^0.3.1"
+  }
+}
+

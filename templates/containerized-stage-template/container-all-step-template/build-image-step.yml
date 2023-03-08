@@ -1,0 +1,93 @@
+parameters:
+# Mandatory Parameters
+- name: dockerFilePath
+  default: ''
+- name: dockerImgTag
+  default: ''
+# Optional Parameters
+- name: dockerLabels
+  type: object
+  default: []
+- name: dockerBuildAdditionalPreSteps
+  type: stepList
+  default: []
+- name: vendorServiceConnection
+  default: ''
+
+steps:
+# Additional pre steps
+- ${{ each step in parameters.dockerBuildAdditionalPreSteps }}:
+  - ${{ step }}
+
+# Login into ACR to download the aqua scanner
+- task: Docker@2
+  displayName: Login to ACN CIO ACR
+  inputs:
+    containerRegistry: 'acncio.azurecr.io Read'
+    command: 'login'
+  enabled: true
+
+ # Login into vendor registry to pull the vendor image if a vendor service connection was specified
+- task: Docker@2
+  displayName: Login to Vendor registry
+  inputs:
+    containerRegistry: ${{ parameters.vendorServiceConnection }}
+    command: 'login'
+  enabled: true 
+  condition: ne('${{ parameters.vendorServiceConnection }}','')
+
+# Build application docker image
+- task: Powershell@2
+  displayName: Build Docker Image
+  name: build_docker_image
+  continueOnError: false
+  timeoutInMinutes: 60
+  inputs:
+    targetType: inline
+    script: |
+      $cmdArgs = @(
+          "build"
+          "--no-cache"
+          "-f"
+          "`"${{ parameters.dockerFilePath }}`""
+          "-t"
+          "`"${{ parameters.dockerImgTag }}`""
+      )
+
+      Write-Host "[Debug] Initial cmdArgs is $cmdArgs"
+      
+      # Handle docker labels
+      $dockerLabels = "${{ join(';', parameters.dockerLabels) }}"
+      Write-Host "[Info] dockerLabels is $dockerLabels"
+      if (![string]::IsNullOrEmpty($dockerLabels)) {
+          $dockerLabels.Split(";") | ForEach {
+            if (![string]::IsNullOrEmpty($_)) {
+              $label = @(
+                  "--label"
+                  "`"$_`""
+              )
+              $cmdArgs += $label
+            }
+          }
+      } else {
+        Write-Host "[Info] dockerLabels is empty"
+      }
+
+      Write-Host "[Debug] cmdArgs with custom docker labels is $cmdArgs"
+
+      $defaultLabel = @(
+          "--label"
+          "`"com.accenture.cio.image.name=${{ parameters.dockerImgTag }}`""
+      )
+      $cmdArgs += $defaultLabel
+
+      Write-Host "[Debug] cmdArgs with default docker labels is $cmdArgs"
+
+      $dockerBuildPath = @(".")
+      $cmdArgs += $dockerBuildPath
+
+      Write-Host "[Debug] cmdArgs is $cmdArgs"
+
+      docker $cmdArgs
+    failOnStderr: true
+  enabled: true

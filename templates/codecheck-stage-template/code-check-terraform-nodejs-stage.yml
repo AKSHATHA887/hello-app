@@ -1,0 +1,65 @@
+parameters:
+- name: TF_SRC_PATH
+  default: ''
+- name: VMIMAGE
+  default: ''
+
+stages:
+- stage: code_quality
+  displayName: Code Quality Checks
+  jobs: 
+  - job: Terraform_Infra_Scan
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}
+    container:
+      image: acr5064.azurecr.io/tf-container-tf12:latest
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    displayName: Terraform IaC Scan
+    steps:
+    - template: terraform_job_template/terraform-iac-scan-job.yml
+      parameters:
+        VMIMAGE: ${{ parameters.VMIMAGE }}
+        TF_SRC_PATH: ${{ parameters.TF_SRC_PATH }}
+
+  - job: unit_test
+    displayName: Lint and Unit Test
+    pool:
+      vmImage: 'ubuntu-latest'  
+    steps:
+      - task: Npm@1
+        displayName: 'Npm Install'
+        inputs:
+          verbose: false
+        enabled: true  
+
+      - task: Npm@1
+        displayName: 'npm Lint'
+        inputs:
+          command: custom
+          verbose: false
+          customCommand: 'run lint'
+        enabled: true
+
+      - task: Npm@1
+        displayName: 'Npm test'
+        inputs:
+          command: custom
+          verbose: false
+          customCommand: 'run test'
+        enabled: true
+
+      - task: PublishTestResults@2
+        displayName: 'Publish Test Results'
+        inputs:
+          testResultsFiles: |
+            reports/*
+            coverage/junit/*.xml
+        condition: succeededOrFailed()
+      - task: PublishCodeCoverageResults@1
+        displayName: 'Publish Code Coverage'
+        inputs:
+          codeCoverageTool: Cobertura
+          summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage/cobertura-coverage.xml'
+          reportDirectory: '$(System.DefaultWorkingDirectory)/coverage'
+        condition: succeededOrFailed()
+  dependsOn: []

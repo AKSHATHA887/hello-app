@@ -1,0 +1,386 @@
+parameters: 
+- name: gcpEnvName
+  default: ''
+- name: msHostedPoolVmImage
+  default: ''
+- name: privatePoolName
+  default: ''
+- name: artifactName
+  default: ''
+- name: archiveFilePathToExtract
+  default: ''
+- name: azureDevOpsVarGroups
+  type: object
+  default: []
+- name: gcpCredentialFile
+  default: ''
+- name: azureDevOpsSecureFiles
+  type: object
+  default: []
+- name: azurermBackendStorageContainer
+  default: ''
+- name: azurermBackendStorageContainerBlobKey
+  default: ''
+- name: deployInfraTFLayerFolder
+  default: ''
+- name: pipelineResourceIdentifier
+  default: ''
+- name: inputTFVarDefinitionFiles
+  type: object
+  default: []
+- name: inputTFVars
+  type: object
+  default: []
+- name: tfLog
+  type: string
+  default: 'UNSET'
+  values:
+  - UNSET
+  - TRACE
+  - DEBUG
+  - INFO
+  - WARN 
+  - ERROR
+- name: gkeAquaTokenValue
+  default: ''
+- name: gkeAddKubeCtlProvider
+  type: boolean
+  default: false
+- name: azdoJobContainerImg
+  type: string
+  default: 'tf-consume-job-container-tf12:latest'
+  values:
+  - 'tf-consume-job-container:latest'
+  - 'tf-consume-job-container-tf12:latest'
+  - 'tf-consume-job-container-tf13-gcp:latest'
+  - 'tf-consume-job-container-tf14-gcp:latest'
+  - 'tf-container-ml-tf14:latest'
+  - 'tf-consume-job-container-tf1-gcp:latest'
+- name: gcpAuthentication
+  default: ''
+- name: gcpKey
+  type: string
+  default: 'AzDoEnabled'
+  values:
+  - 'AzDoEnabled'
+  - 'HashicorpVaultEnabled'
+- name: hashiVaultEnv
+  type: string
+  default: 'UNSET'
+  values:
+  - 'NPD'
+  - 'PRD'
+  - 'UNSET'
+- name: airID
+  type: string
+  default: ''
+- name: gcpProjectName
+  type: string
+  default: ''
+- name: gcpCredentialFileFromVault
+  type: string
+  default: 'gcpLogin.json'
+
+stages:
+- stage: 'Terraform_Plan_Destroy_${{ parameters.gcpEnvName }}'
+  dependsOn: []
+  condition: in(variables['Build.Reason'], 'Manual')
+  displayName: 'Terraform Plan Destroy ${{ parameters.gcpEnvName }}'
+  variables:
+  - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+      - group: ${{variableGroup}}
+  - ${{ if eq(parameters.hashiVaultEnv, 'NPD') }}:
+      - name: 'hashiVaultSecretEnv'
+        value: 'nonProd'
+  - ${{ if eq(parameters.hashiVaultEnv, 'PRD') }}:
+      - name: 'hashiVaultSecretEnv'
+        value: 'prod'
+  jobs:
+  - job: Terraform_Plan_Destroy
+    displayName: Terraform Plan Destroy ${{ parameters.gcpEnvName }}
+    pool:
+      ${{ if ne(parameters.msHostedPoolVmImage, '') }}:
+        vmImage: ${{ parameters.msHostedPoolVmImage }}
+      ${{ if ne(parameters.privatePoolName, '') }}:
+        name: ${{ parameters.privatePoolName }}
+    container:
+      image: acr5064.azurecr.io/${{ parameters.azdoJobContainerImg }}
+      endpoint: CIO-5064-Tfmod-Pull-ACR
+    workspace:
+      clean: all
+    steps:
+    - download: ${{ parameters.pipelineResourceIdentifier }}
+      enabled: true
+
+    - task: ExtractFiles@1
+      displayName: 'Extract Artifact'
+      inputs:
+        archiveFilePatterns: '$(Pipeline.Workspace)/${{ parameters.pipelineResourceIdentifier }}/${{ parameters.artifactName }}/${{ parameters.archiveFilePathToExtract }}'
+        destinationFolder: '$(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract'
+        cleanDestinationFolder: true
+      enabled: true
+
+    - task: CIODevOps.azuredevOps-build-agent-cf-cli-config-file-generator.custom-build-release-task.AzureDevOps Build Agent TF Cli Config File Generator@0
+      displayName: 'AzureDevOps Build Agent TF Cli Config File Generator'
+      enabled: true
+
+    - ${{ if eq(parameters.gcpKey, 'AzDoEnabled') }}:
+      - task: DownloadSecureFile@1
+        displayName: 'Download GCP credential file'
+        inputs:
+          secureFile: ${{ parameters.gcpCredentialFile }}
+        enabled: true
+
+    - ${{ each secureFile in parameters.azureDevOpsSecureFiles }}:
+      - task: DownloadSecureFile@1
+        displayName: 'Download secure file ${{secureFile}}'
+        inputs:
+          secureFile: ${{secureFile}}
+        enabled: true
+
+    - ${{ if ne(parameters.gkeAquaTokenValue, '') }}:
+      - task: Powershell@2
+        displayName: Aqua Token Validation
+        name: Aqua_Token_Validation
+        continueOnError: false
+        timeoutInMinutes: 2
+        inputs:
+          targetType: inline
+          script: |
+            $TF_VAR_aqua_token_value = "${{ parameters.gkeAquaTokenValue }}" 
+            if ($TF_VAR_aqua_token_value -eq "") {
+              Write-Error "value of gkeAquaTokenValue cannot be empty, please check variable gkeAquaTokenValue in your AzureDevOps variable group"
+              exit 1
+            }
+          failOnStderr: true # Optional
+          workingDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+        enabled: true
+
+    - task: Powershell@2
+      displayName: Terraform Init
+      name: tf_init
+      continueOnError: false
+      timeoutInMinutes: 2
+      inputs:
+        targetType: inline
+        script: |
+          if ("${{ parameters.gkeAddKubeCtlProvider }}" -eq "true") {
+            mkdir -p .terraform/plugins/linux_amd64
+            Invoke-WebRequest -Uri "https://github.com/gavinbunney/terraform-provider-kubectl/releases/download/v1.5.0/terraform-provider-kubectl-linux-amd64" -OutFile $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}/.terraform/plugins/linux_amd64/terraform-provider-kubectl_v1.11.3_x4
+            chmod 755 $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}/.terraform/plugins/linux_amd64/terraform-provider-kubectl_v1.11.3_x4
+          } else {
+            Write-Host "Skip downloading terraform kubectl provider due to gkeAddKubeCtlProvider is ${{ parameters.gkeAddKubeCtlProvider }}"
+          }
+
+          Get-ChildItem
+          #Copy-Item $(Agent.TempDirectory)/${{ parameters.gcpCredentialFile }} ./keyfile.json 
+          #Get-ChildItem
+
+          if ("${{ parameters.gkeAquaTokenValue }}" -ne "") {
+            $TF_VAR_aqua_token_value = "${{ parameters.gkeAquaTokenValue }}" 
+            Write-Host "[Debug] Assigned gke aqua token value to tf variable $($TF_VAR_aqua_token_value)"
+          } else {
+            Write-Host "[Debug] Skip assigning gke aqua token value to tf variable due to empty value"
+          }
+          
+          $azdoJobContainerImg = "${{ parameters.azdoJobContainerImg }}"
+          if ("tf-consume-job-container-tf1-gcp:latest" -eq $azdoJobContainerImg) {
+            $cmdArgs = @(
+                "init"
+                "-no-color"
+                "-backend-config=`"storage_account_name=sa5064iactf`""
+                "-backend-config=`"container_name=${{ parameters.azurermBackendStorageContainer }}`""
+                "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+            )
+          } else {
+            $cmdArgs = @(
+                "init"
+                "-no-color"
+                "-backend-config=`"storage_account_name=sa5064iactf`""
+                "-backend-config=`"container_name=${{ parameters.azurermBackendStorageContainer }}`""
+                "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+                "./"
+            )
+          }
+          Write-Host  $cmdArgs 
+          terraform $cmdArgs
+        failOnStderr: true # Optional
+        workingDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+      env:
+        ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY)   
+      enabled: true
+
+    - bash: |
+        terraform workspace select ${{ parameters.gcpEnvName }} || terraform workspace new ${{ parameters.gcpEnvName }} 
+        terraform workspace list -no-color 
+      displayName: 'Terraform Use Workspace'
+      workingDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+      env:
+        ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY) 
+      enabled: true
+
+    - task: qetza.replacetokens.replacetokens-task.replacetokens@3
+      displayName: 'Replace tokens in tfvars for specific environment'
+      inputs:
+        rootDirectory: '$(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}'
+        targetFiles: |
+         **/*.tfvars
+      enabled: true
+
+    - ${{ if eq(parameters.gcpKey, 'HashicorpVaultEnabled') }}:
+      - task: CIODevOps.hashicorp-vault-build-release-task-prd.custom-build-release-task.HashiVaultExt@0
+        name: hashi_vault_credentials
+        displayName: 'HashiCorp Vault Credentials'
+        inputs:
+          HashiEndpoint: '${{ parameters.airID }}-${{ parameters.hashiVaultEnv }}-HashiVault'
+          return: 'secret'
+          secretEnv: '$(hashiVaultSecretEnv)'
+          engineType: 'gcp'
+          gcpRoleSetName: '${{ parameters.gcpProjectName }}-k'
+
+    - task: Powershell@2
+      displayName: Terraform Plan Destroy
+      name: tf_plan_destroy_in_wks
+      continueOnError: false
+      timeoutInMinutes: 60
+      inputs:
+        targetType: inline
+        script: |
+          if ("${{ parameters.gkeAddKubeCtlProvider }}" -eq "true") {
+            mkdir -p .terraform/plugins/linux_amd64
+            Invoke-WebRequest -Uri "https://github.com/gavinbunney/terraform-provider-kubectl/releases/download/v1.5.0/terraform-provider-kubectl-linux-amd64" -OutFile $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}/.terraform/plugins/linux_amd64/terraform-provider-kubectl_v1.11.3_x4
+            chmod 755 $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}/.terraform/plugins/linux_amd64/terraform-provider-kubectl_v1.11.3_x4
+          } else {
+            Write-Host "Skip downloading terraform kubectl provider due to gkeAddKubeCtlProvider is ${{ parameters.gkeAddKubeCtlProvider }}"
+          }
+
+          Get-ChildItem
+          if ("${{ parameters.gcpKey }}" -eq "AzDoEnabled") {
+            Write-Host "[Debug] parameters.gcpKey is ${{ parameters.gcpKey }}"
+            Copy-Item $(Agent.TempDirectory)/${{ parameters.gcpCredentialFile }} ./keyfile.json 
+            $GCP_CRED="$(Agent.TempDirectory)/${{ parameters.gcpCredentialFile }}"
+            Write-Output ("##vso[task.setvariable variable=GCP_CRED;]$GCP_CRED")
+            $Env:GCP_CRED = "$GCP_CRED"
+          } else {
+            Write-Host "[Debug] List files under Build Sources Directory"
+            Get-ChildItem $(Build.SourcesDirectory)
+
+            Write-Host "[Debug] List files under D:/ref/gcp"
+            $TF_GCP_CRED_FILE_Hashi_OUTPUT = Join-Path $(Build.SourcesDirectory) "/D:/ref/gcp"
+            Get-ChildItem $TF_GCP_CRED_FILE_Hashi_OUTPUT
+
+            $TF_GCP_CRED_FILE = Join-Path $(Build.SourcesDirectory) "/D:/ref/gcp/${{ parameters.gcpCredentialFileFromVault }}"
+            Copy-Item $TF_GCP_CRED_FILE ./keyfile.json 
+            Write-Output ("##vso[task.setvariable variable=GCP_CRED;]$TF_GCP_CRED_FILE")
+            $Env:GCP_CRED = "$TF_GCP_CRED_FILE"
+          }
+          Get-ChildItem
+
+          ################## Copy other AzureDevOps secure files if exists ##################
+          $azureDevOpsSecureFiles = "${{ join(';', parameters.azureDevOpsSecureFiles) }}"
+          Write-Host "[Info] Start to copy secure files"
+          if (![string]::IsNullOrEmpty($azureDevOpsSecureFiles)) {
+              Get-ChildItem $(Agent.TempDirectory)
+              $azureDevOpsSecureFiles.Split(";") | ForEach {
+                if (![string]::IsNullOrEmpty($_)) {
+                  if (Test-Path "$(Agent.TempDirectory)/$_"){
+                      Copy-Item $(Agent.TempDirectory)/$_ .
+                  } else {
+                      Write-Host "[Error] Secure file not exists in Agent.TempDirectory"
+                  }
+                } else {
+                    Write-Host "[Error] single inputTFVarDefinitionFile is empty"
+                }
+              }
+          } else {
+              Write-Host "[Info] azureDevOpsSecureFiles is empty"
+          }
+
+          Write-Host "[Debug] Get Items in current location"
+          Get-ChildItem
+
+          if ("${{ parameters.gkeAquaTokenValue }}" -ne "") {
+            $TF_VAR_aqua_token_value = "${{ parameters.gkeAquaTokenValue }}" 
+            Write-Host "[Debug] Assigned gke aqua token value to tf variable $($TF_VAR_aqua_token_value)"
+          } else {
+            Write-Host "[Debug] Skip assigning gke aqua token value to tf variable due to empty value"
+          }
+
+          $azdoJobContainerImg = "${{ parameters.azdoJobContainerImg }}"
+          if ("tf-consume-job-container-tf1-gcp:latest" -eq $azdoJobContainerImg) {
+            $cmdArgs = @(
+                "init"
+                "-no-color"
+                "-backend-config=`"storage_account_name=sa5064iactf`""
+                "-backend-config=`"container_name=${{ parameters.azurermBackendStorageContainer }}`""
+                "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+            )
+          } else {
+            $cmdArgs = @(
+                "init"
+                "-no-color"
+                "-backend-config=`"storage_account_name=sa5064iactf`""
+                "-backend-config=`"container_name=${{ parameters.azurermBackendStorageContainer }}`""
+                "-backend-config=`"key=${{ parameters.azurermBackendStorageContainerBlobKey }}`""
+                "./"
+            )
+          }
+          Write-Host  $cmdArgs 
+          terraform $cmdArgs
+
+          if ("${{ parameters.tfLog }}" -ne "UNSET"){
+              $Env:TF_LOG="${{ parameters.tfLog }}"
+              Write-Host "TF_LOG is set to $($Env:TF_LOG)"
+              Get-ChildItem env:
+          } else {
+              Write-Host "TF_LOG is unset"
+          }
+          
+          $cmdArgs = @(
+              "plan"
+              "-destroy"
+              "-out"
+              "`"tfplan.bin`""
+              "-no-color"
+          )
+
+          # Handle terraform variable definitions (.tfvars) files
+          $inputTFVarDefinitionFiles = "${{ join(';', parameters.inputTFVarDefinitionFiles) }}"
+          if (![string]::IsNullOrEmpty($inputTFVarDefinitionFiles)) {
+              $inputTFVarDefinitionFiles.Split(";") | ForEach {
+                if (![string]::IsNullOrEmpty($_)) {
+                  $cmdArgs += -join('-var-file=', '"', $_, '"')
+                }
+              }
+          } else {
+            Write-Host "inputTFVarDefinitionFiles is empty -> $TfVarFiles"
+          }
+
+          # Handle variables on the Command Line
+          $inputTFVars = "${{ join(';', parameters.inputTFVars) }}"
+          if (![string]::IsNullOrEmpty($inputTFVars)) {
+              $inputTFVars.Split(";") | ForEach {
+                if (![string]::IsNullOrEmpty($_)) {
+                  $cmdArgs += -join('-var=', '"', $_, '"')
+                }
+              }
+          } else {
+            Write-Host "inputTFVars is empty -> $TfVarFiles"
+          }
+
+          Write-Host  $cmdArgs
+
+          terraform $cmdArgs
+        failOnStderr: true
+        workingDirectory: $(Pipeline.Workspace)/build-bundle-${{ parameters.artifactName }}-extract/${{ parameters.deployInfraTFLayerFolder}}
+      env:
+        ARM_ACCESS_KEY: $(TOOL_TF_BACKEND_KEY)
+      enabled: true
+
+    - ${{ if eq(parameters.gcpKey, 'HashicorpVaultEnabled') }}:
+      - task: CIODevOps.hashicorp-vault-remove-gcp-key.custom-build-release-task.HashiVaultRmGCPKey@0
+        condition: always()
+        displayName: 'HashiCorp Vault Remove Lease'
+        inputs:
+          HashiEndpoint: '${{ parameters.airID }}-${{ parameters.hashiVaultEnv }}-HashiVault'
+          LeaseId: '$(hashi_vault_credentials.LeaseId)'

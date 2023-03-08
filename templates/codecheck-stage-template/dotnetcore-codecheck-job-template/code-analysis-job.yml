@@ -1,0 +1,11 @@
+
+
+  steps:
+    - task: UseDotNet@2
+      enabled: true
+      displayName: Code Analysis
+      inputs:
+        command: 'build'
+        projects: '**/*.WebApi.csproj'
+        arguments: >-
+          /p:RunCodeAnalysis=true

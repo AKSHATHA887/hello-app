@@ -1,0 +1,100 @@
+parameters: 
+# Mandatory Parameters
+- name: hashiVaultEnv
+  type: string
+  default: 'UNSET'
+  values:
+  - 'NPD'
+  - 'PRD'
+  - 'UNSET'
+- name: hashiVaultSecretEnv
+  type: string
+  default: ''
+- name: gcpProjectName
+  type: string
+  default: ''
+- name: gcpProjectId
+  type: string
+  default: ''
+- name: dockerRegistry  # Name of the registry integration in Aqua
+  type: string
+- name: dockerImgTag
+  type: string
+- name: airID
+  type: string
+  default: ''
+- name: iacDeployerSAFullEmail
+  type: string
+  default: ''
+
+steps:
+- ${{ if eq(parameters.hashiVaultEnv, 'UNSET') }}:
+  - task: DownloadSecureFile@1
+    displayName: 'Download GCP credential file'
+    inputs:
+      secureFile: '${{ parameters.gcpProjectId }}.json'
+    enabled: true
+
+- ${{ if or(eq(parameters.hashiVaultEnv, 'NPD'), eq(parameters.hashiVaultEnv, 'PRD')) }}:
+  - task: CIODevOps.hashicorp-vault-build-release-task-prd.custom-build-release-task.HashiVaultExt@0
+    name: hashi_vault_credentials_pull
+    displayName: 'HashiCorp Vault Credentials'
+    inputs:
+      HashiEndpoint: '${{ parameters.airID }}-${{ parameters.hashiVaultEnv }}-HashiVault'
+      return: 'secret'
+      secretEnv: '${{ parameters.hashiVaultSecretEnv }}'
+      engineType: 'gcp'
+      gcpRoleSetName: '${{ parameters.gcpProjectName }}-k'
+    enabled: true
+
+- task: Powershell@2
+  displayName: Copy GCP Credential File
+  #name: cp_gcp_credential_file
+  continueOnError: false
+  timeoutInMinutes: 60
+  inputs:
+    targetType: inline
+    script: |
+      Get-ChildItem
+      $hashiVaultEnv = "${{ parameters.hashiVaultEnv }}"
+      Write-Host "[Debug] hashiVaultEnv is $hashiVaultEnv"
+      if ($hashiVaultEnv -eq "UNSET") {
+        $TF_GCP_CRED_FILE="$(Agent.TempDirectory)/${{ parameters.gcpProjectId }}.json"
+        Copy-Item $TF_GCP_CRED_FILE ./keyfile.json 
+        Get-ChildItem
+        Write-Output ("##vso[task.setvariable variable=GCP_CRED;]$TF_GCP_CRED_FILE")
+      } else {
+        $TF_GCP_CRED_FILE = Join-Path $(Build.SourcesDirectory) "/D:/ref/gcp/gcpLogin.json"
+        Copy-Item $TF_GCP_CRED_FILE ./keyfile.json 
+        Get-ChildItem
+        Write-Output ("##vso[task.setvariable variable=GCP_CRED;]$TF_GCP_CRED_FILE")
+      }
+    failOnStderr: true
+  enabled: true
+
+# Pull docker image from GCR
+- bash: |
+    ls -ail && pwd
+    hashiVaultEnv="${{ parameters.hashiVaultEnv }}"
+    if [ $hashiVaultEnv == 'UNSET' ]; then
+      docker login -u _json_key --password-stdin https://${{ parameters.dockerRegistry }} < keyfile.json
+      docker pull ${{ parameters.dockerImgTag }}
+      docker logout
+    else
+      #GCloud AUthentication by using Key Vault Key file
+      gcloud --version
+      gcloud auth activate-service-account --key-file=./keyfile.json
+      gcloud config set auth/impersonate_service_account "${{ parameters.iacDeployerSAFullEmail }}"
+      gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://${{ parameters.dockerRegistry }}
+      docker pull ${{ parameters.dockerImgTag }}
+    fi
+  displayName: 'Pull ${{ parameters.dockerImgTag }} image'
+  enabled: true
+
+- ${{ if or(eq(parameters.hashiVaultEnv, 'NPD'), eq(parameters.hashiVaultEnv, 'PRD')) }}:
+  - task: CIODevOps.hashicorp-vault-remove-gcp-key.custom-build-release-task.HashiVaultRmGCPKey@0
+    condition: always()
+    displayName: 'HashiCorp Vault Remove Lease'
+    inputs:
+      HashiEndpoint: '${{ parameters.airID }}-${{ parameters.hashiVaultEnv }}-HashiVault'
+      LeaseId: '$(hashi_vault_credentials_pull.LeaseId)'

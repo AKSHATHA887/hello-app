@@ -1,0 +1,93 @@
+parameters:
+- name: configMode
+  type: string
+  default: 'manual'
+  values:
+  - 'manual'
+  - 'sonarProjectProperties'
+- name: SonarQubeConnection
+  default: ''
+- name: settingsFile
+  default: ''
+- name: cliProjectKey
+  default: ''
+- name: cliProjectName
+  default: ''
+- name: cliProjectVersion
+  default: ''
+- name: cliSources
+  default: ''
+- name: extraProperties
+  default: ''
+- name: SQToken
+  default: ''
+- name: SQInstance
+  default: 'https://alm.accenture.com/sonar'
+
+steps:
+- ${{ if eq(parameters.configMode, 'manual') }}:
+  - task: SonarSource.sonarqube.15B84CA1-B62F-4A2A-A403-89B77A063157.SonarQubePrepare@4
+    displayName: 'Prepare analysis on SonarQube $(Build.Reason)'
+    inputs:
+      SonarQube: ${{ parameters.SonarQubeConnection }}
+      scannerMode: CLI
+      configMode: manual
+      cliProjectKey: '${{ parameters.cliProjectKey }}'
+      cliProjectName: '${{ parameters.cliProjectName }}'
+      cliProjectVersion: '${{ parameters.cliProjectVersion }}'
+      cliSources: '${{ parameters.cliSources }}'
+      ${{ if ne(parameters.extraProperties, '') }}:
+        extraProperties: |
+          ${{ parameters.extraProperties }}
+    enabled: true
+
+- ${{ if eq(parameters.configMode, 'sonarProjectProperties') }}:
+  - task: SonarSource.sonarqube.15B84CA1-B62F-4A2A-A403-89B77A063157.SonarQubePrepare@4
+    displayName: 'Prepare analysis on SonarQube $(Build.Reason)'
+    inputs:
+      SonarQube: SonarQubeConnection
+      scannerMode: CLI
+      configFile: ${{ parameters.settingsFile }}
+      ${{ if ne(parameters.extraProperties, '') }}:
+        extraProperties: |
+          ${{ parameters.extraProperties }}
+    enabled: true
+
+- task: SonarSource.sonarqube.6D01813A-9589-4B15-8491-8164AEB38055.SonarQubeAnalyze@4
+  displayName: "Run Code Analysis"
+  enabled: true
+
+- task: SonarQubePublish@4
+  inputs:
+    pollingTimeoutSec: "300"
+
+- bash: |
+    printenv
+    
+    echo "[Debug] Source Branch is $(Build.SourceBranch)"
+    echo "[Debug] Build Reason is $(Build.Reason)"
+
+    sonarInstance="${{ parameters.SQInstance }}"
+    SQToken="${{ parameters.SQToken }}"
+    echo "[Debug] SQToken is $SQToken"
+    if [ $(Build.Reason) = "PullRequest" ]; then
+       echo "[Debug] Build Reason is Pull Request"
+       curl -s -u "$SQToken": "$sonarInstance/api/qualitygates/project_status?projectKey=${{ parameters.cliProjectKey }}&pullRequest=$(System.PullRequest.PullRequestId)" > QGProjStatus.json
+    else
+       curl -s -u "$SQToken": "$sonarInstance/api/qualitygates/project_status?projectKey=${{ parameters.cliProjectKey }}&branch=$(Build.SourceBranchName)" > QGProjStatus.json
+    fi
+
+    echo "[Debug] Print QGProjStatus.json"
+    cat QGProjStatus.json
+    projStatus=$(cat QGProjStatus.json | jq '.projectStatus.status')
+    echo $projStatus
+    if [ $projStatus = '"OK"' ]; then
+       echo "Pass Quality Gate!"
+       cat QGProjStatus.json | jq '.'
+    else
+        echo "Failed at Quality  Gate!"
+        cat QGProjStatus.json | jq '.'
+        exit 1
+    fi
+  displayName: "Enforce SonarQube Quality Gate"
+  enabled: true

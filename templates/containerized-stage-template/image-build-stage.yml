@@ -1,0 +1,210 @@
+parameters: 
+# Mandatory Parameters
+- name: envName
+  type: string
+  default: ''
+- name: dockerFilePath
+  type: string
+- name: dockerRegistry
+  type: string
+  default: ''
+- name: dockerImgName
+  type: string
+- name: dockerImgTagName
+  type: string
+- name: azureDevOpsVarGroups
+  type: object
+  default: []
+- name: hashiVaultEnv
+  type: string
+  default: 'UNSET'
+  values:
+  - 'NPD'
+  - 'PRD'
+  - 'UNSET'
+- name: gcpProjectId
+  type: string
+  default: ''
+- name: gcpProjectName
+  type: string
+  default: ''
+- name: airID
+  default: ''
+- name: iacDeployerSAFullEmail
+  default: ''
+- name: imgPostBuildAction
+  type: string
+  default: 'buildOnly'
+  values:
+  - 'buildOnly'
+  - 'saveToTarAsPipelieArtifact'
+  - 'pushToRegistry'
+# ---------- Optional Common ------------
+- name: vmImage
+  default: 'ubuntu-latest'
+- name: dockerLabels
+  type: object
+  default: []
+# ---------- Optional Update/Add variable in AzureDevOps variable group ------------
+- name: variableGroupName
+  type: string
+  default: ''
+- name: variableName
+  type: string
+  default: ''
+- name: variableValue
+  type: string
+  default: ''
+- name: isSecret
+  default: 'false'
+- name: AzureDevOpsOrg
+  default: ''
+- name: AzureDevOpsProjectID
+  default: ''
+- name: AzureDevOpsPAT
+  type: string
+  default: ''
+- name: dockerBuildAdditionalPreSteps
+  type: stepList
+  default: []
+- name: vendorServiceConnection
+  default: ''
+
+stages: 
+- stage: 'Build_Scan_Aqua_Push_Container_Registry_${{ parameters.envName }}'
+  displayName: 'Build Scan and Push Container Registry ${{ parameters.envName }}'
+  variables:
+  - ${{ each variableGroup in parameters.azureDevOpsVarGroups }}:
+      - group: ${{variableGroup}}
+  # Is GCR destination registry
+  - ${{ if contains(parameters.dockerRegistry, 'gcr.io') }}:
+      - name: 'destinationContainerRegistry'
+        value: 'GCR'
+        readonly: true
+  # Is ECR destination registry
+  - ${{ elseif contains(parameters.dockerRegistry, 'dkr.ecr') }}:
+      - name: 'destinationContainerRegistry'
+        value: 'ECR'
+        readonly: true
+  # Is ACR destination registry
+  - ${{ elseif contains(parameters.dockerRegistry, 'azurecr.io') }}:
+      - name: 'destinationContainerRegistry'
+        value: 'ACR'
+        readonly: true
+  # Others destination registry (for build image only)
+  - ${{ else }}:
+      - name: 'destinationContainerRegistry'
+        value: 'Other'
+        readonly: true
+  - ${{ if eq(parameters.hashiVaultEnv, 'NPD') }}:
+      - name: 'hashiVaultSecretEnv'
+        value: 'nonProd'
+  - ${{ if eq(parameters.hashiVaultEnv, 'PRD') }}:
+      - name: 'hashiVaultSecretEnv'
+        value: 'prod'
+  - ${{ if eq(parameters.hashiVaultEnv, 'UNSET') }}:
+      - name: 'hashiVaultSecretEnv'
+        value: ''
+
+  jobs:
+  - job: Build_Scan_Aqua_Push_Container_Registry
+    displayName: 'Build Scan and Push Container Registry ${{ parameters.envName }}'
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    steps:
+    ########################################################################
+    #               1. Get Registry                                        #
+    ########################################################################
+    # Get Registry 
+    - template: container-all-step-template/get-container-registry-step.yml
+      parameters:
+        destinationContainerRegistry: ${{ variables.destinationContainerRegistry }}
+        dockerRegistry: ${{ parameters.dockerRegistry }}
+        identifier: 'target'
+
+    ########################################################################
+    #               2. Build Image                                         #
+    ########################################################################
+    # Build Image Step
+    - template: container-all-step-template/build-image-step.yml
+      parameters:
+        dockerFilePath: ${{ parameters.dockerFilePath }}
+        dockerImgTag: '${{ parameters.dockerImgName }}:${{ parameters.dockerImgTagName }}'
+        dockerLabels: ${{ parameters.dockerLabels }}
+        dockerBuildAdditionalPreSteps:  ${{ parameters.dockerBuildAdditionalPreSteps }}
+        vendorServiceConnection: ${{ parameters.vendorServiceConnection }}
+
+    ########################################################################
+    #               3. Save image to TAR and Publish Artifact              #
+    ########################################################################
+    # Save image to TAR and publish image as pipeline artifact
+    - ${{ if eq(parameters.imgPostBuildAction, 'saveToTarAsPipelieArtifact') }}:
+      - template: container-all-step-template/save-image-to-tar-step.yml
+        parameters:
+          dockerImgName: ${{ parameters.dockerImgName }}
+          dockerImgTagName: ${{ parameters.dockerImgTagName }}
+
+    ########################################################################
+    #               4. Scan with Aqua and Push to Registry                 #
+    ########################################################################
+    - ${{ if eq(parameters.imgPostBuildAction, 'pushToRegistry') }}:
+      # Image Retag
+      - template: container-all-step-template/retag-image-step.yml
+        parameters:
+          sourceImage: '${{ parameters.dockerImgName }}:${{ parameters.dockerImgTagName }}'
+          targetImage: '${{ parameters.dockerRegistry }}/${{ parameters.dockerImgName }}:${{ parameters.dockerImgTagName }}'
+
+      # Scan with Aqua and Register in base registry
+      - ${{ if or(eq(parameters.vmImage, 'windows-latest'),eq(parameters.vmImage, 'windows-2019'),eq(parameters.vmImage, 'windows-2022'),eq(parameters.vmImage, 'windows-latest'),eq(parameters.vmImage, 'vs2017-win2016')) }}:
+        - template: aqua-scan-step-template/aqua-scan-step-windows.yml
+          parameters:
+            dockerRegistry: $(get_registry_step_target.APP_DOCKER_REGISTRY)
+            dockerImgTag: '${{ parameters.dockerRegistry }}/${{ parameters.dockerImgName }}:${{ parameters.dockerImgTagName }}'
+      - ${{ else }}: # default to Linux
+        - template: aqua-scan-step-template/aqua-scan-step.yml
+          parameters:
+            dockerRegistry: $(get_registry_step_target.APP_DOCKER_REGISTRY)
+            dockerImgTag: '${{ parameters.dockerRegistry }}/${{ parameters.dockerImgName }}:${{ parameters.dockerImgTagName }}'
+            vendorServiceConnection: ${{ parameters.vendorServiceConnection }}
+          
+      # Push Container Image to Base Registry
+      - ${{ if eq(variables.destinationContainerRegistry, 'GCR') }}:
+        - template: container-all-step-template/gcp/auth-gcr-push-image-step.yml
+          parameters:
+            hashiVaultEnv: '${{ parameters.hashiVaultEnv }}'
+            hashiVaultSecretEnv: '$(hashiVaultSecretEnv)'
+            gcpProjectId: ${{ parameters.gcpProjectId }}
+            gcpProjectName: ${{ parameters.gcpProjectName }}
+            dockerRegistry: $(get_registry_step_target.APP_DOCKER_REGISTRY)
+            dockerImgTag: '${{ parameters.dockerRegistry }}/${{ parameters.dockerImgName }}:${{ parameters.dockerImgTagName }}'
+            airID: ${{ parameters.airID }}
+            iacDeployerSAFullEmail: ${{ parameters.iacDeployerSAFullEmail }}
+      # Push Container Image to ECR destination registry
+      - ${{ elseif eq(variables.destinationContainerRegistry, 'ECR') }}:
+        - template: container-all-step-template/aws/auth-ecr-push-image-step.yml
+          parameters:
+            dockerImgTag: '${{ parameters.dockerRegistry }}/${{ parameters.dockerImgName }}:${{ parameters.dockerImgTagName }}'
+            identifier: 'target'
+      # Push Container Image to ACR destination registry
+      - ${{ elseif eq(variables.destinationContainerRegistry, 'ACR') }}:
+        - template: container-all-step-template/azure/auth-acr-push-image-step.yml
+          parameters:
+            dockerImgTag: '${{ parameters.dockerRegistry }}/${{ parameters.dockerImgName }}:${{ parameters.dockerImgTagName }}'
+            dockerRegistry: $(get_registry_step_target.APP_DOCKER_REGISTRY)
+      # Push Container Image to Other destination registry
+      - ${{ else }}:
+        - script: 'Failed to identify destination container registry from dockerImgTag. Only support GCR, ECR or ACR'
+
+    ########################################################################
+    #               5. Update variable in exisitng variable group          #
+    ########################################################################
+    # Optional - Update variable in variable group      
+    - ${{ if ne(parameters.variableGroupName, '') }}:
+      - template: /templates/operation/azuredevops-all-stage-template/azuredevops-all-step-template/update-variable-in-azdo-varaible-group-step.yml
+        parameters:
+          variableGroupName: '${{ parameters.variableGroupName }}'
+          variableName: '${{ parameters.variableName }}'
+          variableValue: '${{ parameters.variableValue }}'
+          AzureDevOpsOrg: '${{ parameters.AzureDevOpsOrg }}'
+          AzureDevOpsProjectID: '${{ parameters.AzureDevOpsProjectID }}'
+          AzureDevOpsPAT: '${{ parameters.AzureDevOpsPAT }}'

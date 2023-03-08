@@ -1,0 +1,44 @@
+##############################################################
+################ Package Atrifcats Template ##################
+##############################################################
+parameters:
+- name: PROJECTWORKINGDIRECTORY
+  default: ''
+- name: ENVSTAGES #For multi env use this var and replace "dev" with ${{ parameters.ENVSTAGES }}
+  default: ''
+- name: AWSPACKAGENAME
+  default: ''
+- name: targetFramework
+  default: 'net6.0'
+- name: CONFIGURATION
+  default: ''
+
+steps:
+  - script: |
+        dotnet lambda package --configuration ${{ parameters.CONFIGURATION }} --framework ${{ parameters.targetFramework }} --output-package dist-pkg-dev/${{ parameters.AWSPACKAGENAME }}
+    workingDirectory: '$(PROJECTWORKINGDIRECTORY)/'
+    displayName: 'Create lambda-package'
+
+  - task: PowerShell@2
+    displayName: Lambda-Package
+    condition: succeededOrFailed()
+    inputs: 
+      targetType: inline
+      script: |
+
+          $destpath = "$(PROJECTWORKINGDIRECTORY)/dist-pkg-dev"
+          Copy-Item $(System.DefaultWorkingDirectory)/infra* -Destination $destpath -Recurse -Force -ErrorAction Stop
+          
+          Get-ChildItem -Path $(PROJECTWORKINGDIRECTORY)/dist-pkg-dev
+
+  - task: ArchiveFiles@2
+    inputs:
+      rootFolderOrFile: '$(PROJECTWORKINGDIRECTORY)/dist-pkg-dev'
+      includeRootFolder: false
+      archiveType: 'zip'
+      archiveFile: '$(Build.ArtifactStagingDirectory)/source.zip'
+      replaceExistingArchive: true
+      
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: drop'
+    condition: succeededOrFailed()

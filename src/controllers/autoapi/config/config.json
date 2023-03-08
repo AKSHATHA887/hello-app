@@ -1,0 +1,25 @@
+{
+    "project": {
+        "air_id": "#{PROJECT_AIRID}#",
+        "name": "#{PROJECT_AIRID}#"
+    },
+    "api": {
+        "base_url": "#{API_BASE_URL}#"
+    },
+    "datasource": {
+        "type": "#{DATASOURCE_TYPE}#",
+        "properties": {
+            "project_id": "#{DATASOURCE_PROJECT_ID}#",
+            "dataset_id": "#{DATASOURCE_DATASET_ID}#",
+            "path_to_keyfile": "#{DATASOURCE_PATH_TO_KEYFILE}#"
+        },
+        "schema": {
+            "tables": {
+                "#{1_TABLE_NAME}#": {
+                    "primary_key": "#{1_PRIMARY_KEY}#",
+                    "default_orderby": "#{1_ORDER_BY}#"
+                }
+            }
+        }
+    }
+}

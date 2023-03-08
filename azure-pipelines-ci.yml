@@ -1,0 +1,42 @@
+resources:
+  repositories:
+    - repository: AzurePipelinesTemplateAIR2731
+      type: git
+      name: EnterpriseArchitecture_2641/_git/Azure-Pipelines-Template-AIR2731
+      endpoint: CIO EA Cross Organization Access-EnterpriseArchitecture_2641
+      ref: refs/tags/v1.68
+
+trigger: none
+#trigger:
+#  batch: true
+#  branches:
+#    include:
+#    - master
+
+variables:
+  - template: azure-pipelines-common-vars.yml
+  - group: '${{ variables.AZUREDEVOPS_SBX_VAR_GROUP_NAME }}'
+  - name: buildConfiguration
+    value: Release
+
+stages:
+  # Compliance Test
+#  - template: templates/release-stage-template/gcp-stage-template/tf-compliance.yml@AzurePipelinesTemplateAIR2731
+#    parameters:
+#      vmImage: ${{ variables.VMIMAGE }}
+#      deployInfraTFLayerFolder: ${{ variables.DEPLOY_INFRA_TF_LAYER_FOLDER }}
+#      airId: ${{ variables.AIR_ID }}
+
+  # Publish Artifact
+#  - template: templates/release-stage-template/gcp-stage-template/nodejs-build-publish-artifact.yml@AzurePipelinesTemplateAIR2731
+  - template: templates/release-stage-template/gcp-stage-template/nodejs-build-publish-artifact.yml
+    parameters:
+      vmImage: ${{ variables.VMIMAGE }}
+      deployInfraTFLayerFolder: ${{ variables.DEPLOY_INFRA_TF_LAYER_FOLDER }}
+      artifactName: ${{ variables.ARTIFACT_NAME }}
+      nodeJSVer: ${{ variables.NODE_JS_VER }}
+      adopSonarQubeProjKey: ${{ variables.ADOP_SONARQUBE_PROJECT_KEY }}
+      adopSonarQubeProjName: ${{ variables.ADOP_SONARQUBE_PROJECT_NAME }}
+      sonarQubeExclusions: ${{ variables.ADOP_SONARQUBE_EXCLUSIONS }}
+      webpackOutputFolder: ${{ variables.WEBPACK_OUTPUT_FOLDER }}
+

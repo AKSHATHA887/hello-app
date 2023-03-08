@@ -1,0 +1,33 @@
+##############################################################
+################ Functional Validation Template ##############
+##############################################################
+
+parameters:
+- name: VMIMAGE  # defaults for any parameters that aren't specified
+  default: ''
+- name: DOTNETSDKVERSION  # defaults for any parameters that aren't specified
+  default: ''
+- name: PROJECTFILEPATH
+  default: $(System.DefaultWorkingDirectory)/**/*.WebApi.csproj
+
+stages: 
+- stage: functional_validation_checks
+  displayName: Functional Validation Checks
+  jobs:
+  - job: AzSmokeTest
+    displayName: Smoke Test
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}
+    steps:
+    - task: UseDotNet@2
+      displayName: Install DotNet SDK
+      inputs:
+        packageType: 'sdk'
+        version: ${{ parameters.DOTNETSDKVERSION }}   
+
+    - template: dotnetcore-smoketest-job-template/azure-webapi-smoke-test-job.yml # Template reference
+      parameters:
+        PathToProject: ${{ parameters.PROJECTFILEPATH }}
+   
+
+   

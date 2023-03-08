@@ -1,0 +1,60 @@
+#############################################################################
+####################### Container Web API Smoke Tests #######################
+####################### PowerShell Script ###################################
+#############################################################################
+parameters:
+    - name: CONTAINER_REGISTRY
+      default: ''
+    - name: STARTUPSLEEPTIME
+      default: 40
+
+
+steps:
+- task: Docker@2
+  inputs:
+    containerRegistry: ${{ parameters.CONTAINER_REGISTRY }}
+    command: 'login'
+
+- task: PowerShell@2
+  displayName: Smoke Test
+  enabled: true
+  inputs:
+    targetType: 'inline'
+    script: |
+
+        # build docker image
+        docker build --tag smokewebapitest .
+        # run docker image
+        $id = docker run -d --rm --name smoke_test -p 8443:8443 smokewebapitest
+        # find the ip address
+        $ipAddress = docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $id
+        # create health endpoint
+        $uri =  "https://" + $ipAddress + ":8443/health"
+        # sleep for some seconds for startup
+        Start-Sleep ${{ parameters.STARTUPSLEEPTIME }}
+        
+        $statusCode=200
+        try
+        {
+          Write-Host $uri
+          # invoke the endpoint. Expect to get 200
+          $response = Invoke-WebRequest -Uri $uri -SkipCertificateCheck
+          Write-Host $response
+          Write-Host $error[0].Exception.Message
+        }
+        catch
+        {
+          # catch & read the current statusCode
+          $statusCode =  $_.Exception.Response | Select-Object -ExpandProperty StatusCode
+          Write-Host "catch"
+          Write-Host $error[0].Exception.Message
+        }
+        finally
+        {
+          if($statusCode -ne 200)
+          {
+            Write-Host $error[0].Exception.Message
+            Write-Error "AzDocker Smoke test failed with StatusCode:$statusCode"
+            exit 1;
+          }
+        }

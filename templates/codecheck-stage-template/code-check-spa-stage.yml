@@ -1,0 +1,69 @@
+##############################################################
+################ code check  Template ##############
+##############################################################
+parameters:
+- name: VMIMAGE  # defaults for any parameters that aren't specified
+  default: 'ubuntu-latest'
+- name: FAIL_ON_LINT  # defaults for any parameters that aren't specified
+  default: 'true'
+- name: enabled_cacheNodeModules
+  default: true
+- name: enabled_cacheCypress
+  default: true
+stages: 
+- stage: code_quality_check
+  displayName: Code Quality Check 
+  jobs:
+    - job: unit_test
+      displayName: Lint and Unit Test
+      pool:
+        vmImage: ${{ parameters.VMIMAGE }}
+      steps:
+        - template: /templates/common-step-template/npm-install-cache-package-steps.yml@AzurePipelinesTemplateAIR2731  
+          parameters:
+            enabled_cacheNodeModules: ${{ parameters.enabled_cacheNodeModules }}
+            enabled_cacheCypress: ${{ parameters.enabled_cacheCypress }}
+        - task: Npm@1
+          displayName: 'npm Lint'
+          inputs:
+            command: custom
+            verbose: false
+            customCommand: 'run lint'
+          enabled: true
+          continueOnError: ${{  eq(parameters.FAIL_ON_LINT, 'true')  }}
+        - task: Npm@1
+          displayName: 'Npm test'
+          inputs:
+            command: custom
+            verbose: false
+            customCommand: 'run test:headless'
+          enabled: true
+
+        - bash: |
+              #!/bin/bash
+              CHROME_VERSION=$(google-chrome --version | awk '{print $3}')
+              echo -e "chrome is on \n $CHROME_VERSION"
+              npx webdriver-manager update --gecko=false --versions.chrome $CHROME_VERSION
+          displayName: 'Prep webdriver for agent'
+        - task: Npm@1
+          displayName: 'E2E tests'
+          inputs:
+            command: custom
+            verbose: false
+            customCommand: 'run e2e:ci'
+          enabled: true
+
+        - task: PublishTestResults@2
+          displayName: 'Publish Test Results'
+          inputs:
+            testResultsFiles: |
+              reports/*
+              coverage/junit.xml
+          condition: succeededOrFailed()
+        - task: PublishCodeCoverageResults@1
+          displayName: 'Publish Code Coverage'
+          inputs:
+            codeCoverageTool: Cobertura
+            summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage/cobertura-coverage.xml'
+            reportDirectory: '$(System.DefaultWorkingDirectory)/coverage'
+          condition: succeededOrFailed()

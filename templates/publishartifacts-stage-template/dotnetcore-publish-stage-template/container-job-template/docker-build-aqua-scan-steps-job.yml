@@ -1,0 +1,52 @@
+parameters:
+- name: AQUA_SCANNER_REGISTRY
+  default: ''
+- name: FULL_DIST_IMAGE
+  default: ''
+- name: AQUA_SCANNER_IMAGE
+  default: ''
+- name: AQUA_SCANNER_CONNECTION
+  default: ''
+# jobs:
+# - job: docker_build_aqua_scan
+steps:
+# Login into ACR to download the aqua scanner
+  - task: Docker@2
+    displayName: Login to ACR
+    inputs:
+      containerRegistry: ${{ parameters.AQUA_SCANNER_REGISTRY }}
+      command: 'login'
+    enabled: true
+
+  # Build application docker image
+  - script: docker build -t ${{ parameters.FULL_DIST_IMAGE }} --no-cache -f Dockerfile  .  
+    displayName: Build ${{ parameters.FULL_DIST_IMAGE }} image
+    enabled: true
+
+  # Pull Common Aqua Scanner docker image
+  - script: docker pull ${{ parameters.AQUA_SCANNER_IMAGE }}
+    displayName: 'Get AQUA scanner image'
+    enabled: true
+
+  # Scan with Aqua
+  - task: aquasecScanner@4
+    displayName: Scanning ${{ parameters.FULL_DIST_IMAGE }}
+    inputs:
+      image: ${{ parameters.FULL_DIST_IMAGE }}
+      scanType: 'local'
+      customFlags: '--direct-cc'
+      registerCompliant: true
+      scanner: ${{ parameters.AQUA_SCANNER_IMAGE }}
+      registry: 'gcr.io'
+      connection: ${{ parameters.AQUA_SCANNER_CONNECTION }}
+    enabled: true
+
+  # Logout from ACR
+  - task: Docker@2
+    displayName: Logout from ACR
+    inputs:
+      containerRegistry: ${{ parameters.AQUA_SCANNER_REGISTRY }}
+      command: 'logout'
+    enabled: true
+
+

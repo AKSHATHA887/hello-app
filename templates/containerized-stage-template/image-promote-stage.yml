@@ -1,0 +1,377 @@
+parameters:
+- name: stageName
+  default: ''
+# ---------- Source ------------
+- name: sourceDockerImgTag
+  type: string
+  default: ''
+- name: sourceAzureDevOpsVarGroups
+  type: object
+  default: []
+- name: sourceGCPProjectId
+  default: ''
+- name: sourceGCPProjectName
+  default: ''
+- name: sourceHashiVaultEnv
+  type: string
+  default: 'UNSET'
+  values:
+  - 'NPD'
+  - 'PRD'
+  - 'UNSET'
+- name: sourceAirID
+  default: ''
+- name: sourceIaCDeployerSAFullEmail
+  default: ''
+# ---------- Target ------------
+- name: targetDockerImgTag
+  type: string
+  default: ''
+- name: targetAzureDevOpsVarGroups
+  type: object
+  default: []
+- name: targetGCPProjectId
+  default: ''
+- name: targetGCPProjectName
+  default: ''
+- name: targetHashiVaultEnv
+  type: string
+  default: 'UNSET'
+  values:
+  - 'NPD'
+  - 'PRD'
+  - 'UNSET'
+- name: targetAirID
+  default: ''
+- name: targetIaCDeployerSAFullEmail
+  default: ''
+# ---------- Common ------------
+- name: dependsOn
+  type: object
+  default: 
+    - PREVIOUS 
+- name: condition
+  default: ''
+- name: azureDevOpsEnvironment
+  default: ''
+# Optional Parameters
+- name: vmImage
+  default: 'ubuntu-latest'
+# ---------- Optional Update/Add variable in AzureDevOps variable group ------------
+- name: variableGroupName
+  type: string
+  default: ''
+- name: variableName
+  type: string
+  default: ''
+- name: variableValue
+  type: string
+  default: ''
+- name: isSecret
+  default: 'false'
+- name: AzureDevOpsOrg
+  default: ''
+- name: AzureDevOpsProjectID
+  default: ''
+- name: AzureDevOpsPAT
+  type: string
+  default: ''
+- name: vendorServiceConnection
+  default: ''
+
+stages:
+- stage: '${{ parameters.stageName }}'
+  ${{ if and(ne(parameters.dependsOn, ''), ne(join(';',parameters.dependsOn), 'PREVIOUS')) }}:
+    dependsOn: ${{ parameters.dependsOn }}
+  ${{ if ne(parameters.condition, '') }}:
+    condition: ${{ parameters.condition }}
+  displayName: '${{ parameters.stageName }}'
+  variables:
+  # Is GCR source registry
+  - ${{ if contains(parameters.sourceDockerImgTag, 'gcr.io') }}:
+      - name: 'sourceContainerRegistry'
+        value: 'GCR'
+        readonly: true
+  # Is ECR source registry
+  - ${{ if contains(parameters.sourceDockerImgTag, 'dkr.ecr') }}:
+      - name: 'sourceContainerRegistry'
+        value: 'ECR'
+        readonly: true
+  # Is ACR source registry
+  - ${{ if contains(parameters.sourceDockerImgTag, 'azurecr.io') }}:
+      - name: 'sourceContainerRegistry'
+        value: 'ACR'
+        readonly: true
+  # Is GCR destination registry
+  - ${{ if contains(parameters.targetDockerImgTag, 'gcr.io') }}:
+      - name: 'destinationContainerRegistry'
+        value: 'GCR'
+        readonly: true
+  # Is ECR destination registry
+  - ${{ if contains(parameters.targetDockerImgTag, 'dkr.ecr') }}:
+      - name: 'destinationContainerRegistry'
+        value: 'ECR'
+        readonly: true
+  # Is ACR destination registry
+  - ${{ if contains(parameters.targetDockerImgTag, 'azurecr.io') }}:
+      - name: 'destinationContainerRegistry'
+        value: 'ACR'
+        readonly: true
+  # For GCP HashiVault Enabled Project
+  - ${{ if eq(parameters.sourceHashiVaultEnv, 'NPD') }}:
+      - name: 'sourceHashiVaultSecretEnv'
+        value: 'nonProd'
+  - ${{ if eq(parameters.sourceHashiVaultEnv, 'PRD') }}:
+      - name: 'sourceHashiVaultSecretEnv'
+        value: 'prod'
+  - ${{ if eq(parameters.sourceHashiVaultEnv, 'UNSET') }}:
+      - name: 'sourceHashiVaultSecretEnv'
+        value: ''
+  - ${{ if eq(parameters.targetHashiVaultEnv, 'NPD') }}:
+      - name: 'targetHashiVaultSecretEnv'
+        value: 'nonProd'
+  - ${{ if eq(parameters.targetHashiVaultEnv, 'PRD') }}:
+      - name: 'targetHashiVaultSecretEnv'
+        value: 'prod'
+  - ${{ if eq(parameters.targetHashiVaultEnv, 'UNSET') }}:
+      - name: 'targetHashiVaultSecretEnv'
+        value: ''
+  jobs:
+  ########################################################################
+  #               Job: Authenticate and Get Source Registry Info         #
+  ########################################################################
+  - ${{ if ne(variables.sourceContainerRegistry, 'GCR') }}:
+    - job: Authenticate_Source_Registry
+      displayName: Authenticate Source Registry
+      pool:
+        vmImage: ${{ parameters.vmImage }}
+      workspace:
+        clean: all
+      variables:
+      - ${{ each variableGroup in parameters.sourceAzureDevOpsVarGroups }}:
+          - group: ${{variableGroup}}
+      steps:
+      - ${{ if eq(variables.sourceContainerRegistry, 'ECR') }}:
+        - task: Powershell@2
+          displayName: GetECRAuthenticationInfo
+          name: Get_ECR_Auth_Info
+          continueOnError: false
+          timeoutInMinutes: 2
+          inputs:
+            targetType: inline
+            script: |
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_AWS_ACCESS_KEY_ID;isOutput=true;]$($Env:AWS_ACCESS_KEY_ID)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_AWS_SECRET_ACCESS_KEY;issecret=true;isOutput=true;]$($Env:AWS_SECRET_ACCESS_KEY)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_AWS_REGION;isOutput=true;]$($Env:AWS_REGION)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_AWS_ACCOUNT_ID;isOutput=true;]$($Env:AWS_ACCOUNT_ID)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_NEW_APP_TEAM_DEPLOYER_ROLE;isOutput=true;]$($Env:NEW_APP_TEAM_DEPLOYER_ROLE)"
+            failOnStderr: true # Optional
+          env:
+            AWS_ACCESS_KEY_ID: $(NEW_AWS_ACCESS_KEY)
+            AWS_SECRET_ACCESS_KEY: $(NEW_AWS_SECRET_KEY) 
+            AWS_REGION: $(AWS_REGION)
+            AWS_ACCOUNT_ID: $(AWS_ACCOUNT_ID)
+          enabled: true
+      - ${{ if eq(variables.sourceContainerRegistry, 'ACR') }}:
+        - task: Powershell@2
+          displayName: GetACRAuthenticationInfo
+          name: Get_ACR_Auth_Info
+          continueOnError: false
+          timeoutInMinutes: 2
+          inputs:
+            targetType: inline
+            script: |
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_ARM_CLIENT_CERTIFICATE_PASSWORD;issecret=true;isOutput=true;]$($Env:ARM_CLIENT_CERTIFICATE_PASSWORD)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_ARM_CLIENT_SECRET;issecret=true;isOutput=true;]$($Env:ARM_CLIENT_SECRET)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_DATABRICKS_AZURE_CLIENT_SECRET;issecret=true;isOutput=true;]$($Env:DATABRICKS_AZURE_CLIENT_SECRET)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_ARM_CLIENT_ID;isOutput=true;]$($Env:ARM_CLIENT_ID)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_ARM_SUBSCRIPTION_ID;isOutput=true;]$($Env:ARM_SUBSCRIPTION_ID)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_ARM_TENANT_ID;isOutput=true;]$($Env:ARM_TENANT_ID)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_AZURE_ADGROUP_GROUP_NAME;isOutput=true;]$($Env:AZURE_ADGROUP_GROUP_NAME)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_AZURE_ADGROUP_OBJECT_ID;isOutput=true;]$($Env:AZURE_ADGROUP_OBJECT_ID)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_AZURE_PEM_CERT_NAME;isOutput=true;]$($Env:AZURE_PEM_CERT_NAME)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_AZURE_PFX_CERT_NAME;isOutput=true;]$($Env:AZURE_PFX_CERT_NAME)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_ENVIRONMENT;isOutput=true;]$($Env:ENVIRONMENT)"
+              Write-Host "##vso[task.setvariable variable=SRC_REGISTRY_PROJECT_DEPLOYER_ACCOUNT;isOutput=true;]$($Env:PROJECT_DEPLOYER_ACCOUNT)"
+            failOnStderr: true # Optional
+          env:
+            ARM_CLIENT_CERTIFICATE_PASSWORD: $(ARM_CLIENT_CERTIFICATE_PASSWORD)
+            ARM_CLIENT_ID: $(ARM_CLIENT_ID) 
+            ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+            ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+            ARM_TENANT_ID: $(ARM_TENANT_ID)
+            AZURE_ADGROUP_GROUP_NAME: $(AZURE_ADGROUP_GROUP_NAME)
+            AZURE_ADGROUP_OBJECT_ID: $(AZURE_ADGROUP_OBJECT_ID)
+            AZURE_PEM_CERT_NAME: $(AZURE_PEM_CERT_NAME)
+            AZURE_PFX_CERT_NAME: $(AZURE_PFX_CERT_NAME)
+            DATABRICKS_AZURE_CLIENT_SECRET: $(DATABRICKS_AZURE_CLIENT_SECRET)
+            ENVIRONMENT: $(ENVIRONMENT)
+            PROJECT_DEPLOYER_ACCOUNT: $(PROJECT_DEPLOYER_ACCOUNT)
+          enabled: true
+  - deployment: ${{ parameters.stageName }}
+    ${{ if ne(variables.sourceContainerRegistry, 'GCR') }}:
+      dependsOn: ['Authenticate_Source_Registry']
+    displayName: ${{ parameters.stageName }}
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    workspace:
+      clean: all
+    variables:
+    - ${{ each variableGroup in parameters.targetAzureDevOpsVarGroups }}:
+        - group: ${{variableGroup}}
+    - ${{ if eq(variables.sourceContainerRegistry, 'ECR') }}:
+        - name: 'SRC_REGISTRY_AWS_ACCESS_KEY_ID'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ECR_Auth_Info.SRC_REGISTRY_AWS_ACCESS_KEY_ID'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_AWS_SECRET_ACCESS_KEY'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ECR_Auth_Info.SRC_REGISTRY_AWS_SECRET_ACCESS_KEY'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_AWS_REGION'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ECR_Auth_Info.SRC_REGISTRY_AWS_REGION'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_AWS_ACCOUNT_ID'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ECR_Auth_Info.SRC_REGISTRY_AWS_ACCOUNT_ID'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_NEW_APP_TEAM_DEPLOYER_ROLE'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ECR_Auth_Info.SRC_REGISTRY_NEW_APP_TEAM_DEPLOYER_ROLE'] ]
+          readonly: true
+    - ${{ if eq(variables.sourceContainerRegistry, 'ACR') }}:
+        - name: 'SRC_REGISTRY_ARM_CLIENT_CERTIFICATE_PASSWORD'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_ARM_CLIENT_CERTIFICATE_PASSWORD'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_ARM_CLIENT_SECRET'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_ARM_CLIENT_SECRET'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_DATABRICKS_AZURE_CLIENT_SECRET'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_DATABRICKS_AZURE_CLIENT_SECRET'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_ARM_CLIENT_ID'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_ARM_CLIENT_ID'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_ARM_SUBSCRIPTION_ID'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_ARM_SUBSCRIPTION_ID'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_ARM_TENANT_ID'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_ARM_TENANT_ID'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_AZURE_ADGROUP_GROUP_NAME'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_AZURE_ADGROUP_GROUP_NAME'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_AZURE_ADGROUP_OBJECT_ID'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_AZURE_ADGROUP_OBJECT_ID'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_AZURE_PEM_CERT_NAME'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_AZURE_PEM_CERT_NAME'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_AZURE_PFX_CERT_NAME'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_AZURE_PFX_CERT_NAME'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_ENVIRONMENT'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_ENVIRONMENT'] ]
+          readonly: true
+        - name: 'SRC_REGISTRY_PROJECT_DEPLOYER_ACCOUNT'
+          value: $[ dependencies.Authenticate_Source_Registry.outputs['Get_ACR_Auth_Info.SRC_REGISTRY_PROJECT_DEPLOYER_ACCOUNT'] ]
+          readonly: true
+    environment: ${{ parameters.azureDevOpsEnvironment }}
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: none
+          # Get Registry 
+          - template: container-all-step-template/get-container-registry-step.yml
+            parameters:
+              destinationContainerRegistry: ${{ variables.destinationContainerRegistry }}
+              dockerImgTag: ${{ parameters.sourceDockerImgTag }}
+              identifier: 'source'
+          - template: container-all-step-template/get-container-registry-step.yml
+            parameters:
+              destinationContainerRegistry: ${{ variables.destinationContainerRegistry }}
+              dockerImgTag: ${{ parameters.targetDockerImgTag }}
+              identifier: 'target'
+          # Pull Container Image from GCR source registry
+          - ${{ if eq(variables.sourceContainerRegistry, 'GCR') }}:
+            - template: container-all-step-template/gcp/auth-gcr-pull-image-step.yml
+              parameters:
+                hashiVaultEnv: '${{ parameters.sourceHashiVaultEnv }}'
+                hashiVaultSecretEnv: '$(sourceHashiVaultSecretEnv)'
+                gcpProjectId: ${{ parameters.sourceGCPProjectId }}
+                gcpProjectName: ${{ parameters.sourceGCPProjectName }}
+                dockerRegistry: $(get_registry_step_source.APP_DOCKER_REGISTRY)
+                dockerImgTag: '${{ parameters.sourceDockerImgTag }}'
+                airID: ${{ parameters.sourceAirID }}
+                iacDeployerSAFullEmail: ${{ parameters.sourceIaCDeployerSAFullEmail }}
+          # Pull Container Image from ECR source registry
+          - ${{ elseif eq(variables.sourceContainerRegistry, 'ECR') }}:
+            - template: container-all-step-template/aws/auth-ecr-pull-image-step.yml
+              parameters:
+                dockerImgTag: '${{ parameters.sourceDockerImgTag }}'
+                awsAccessKeyId: '$(SRC_REGISTRY_AWS_ACCESS_KEY_ID)'
+                awsSecretAccessKey: '$(SRC_REGISTRY_AWS_SECRET_ACCESS_KEY)'
+                awsRegion: '$(SRC_REGISTRY_AWS_REGION)'
+                awsAccountId: '$(SRC_REGISTRY_AWS_ACCOUNT_ID)'
+                awsNewAppTeamDeployerRole: '$(SRC_REGISTRY_NEW_APP_TEAM_DEPLOYER_ROLE)'
+                identifier: 'source'
+          # Pull Container Image from ACR source registry
+          - ${{ elseif eq(variables.sourceContainerRegistry, 'ACR') }}:
+            - template: container-all-step-template/azure/auth-acr-pull-image-step.yml
+              parameters:
+                dockerImgTag: '${{ parameters.sourceDockerImgTag }}'
+                dockerRegistry: '$(get_registry_step_source.APP_DOCKER_REGISTRY)'
+                armClientId: '$(SRC_REGISTRY_ARM_CLIENT_ID)'
+                armTenantId: '$(SRC_REGISTRY_ARM_TENANT_ID)'
+                databricksAzureClientSecret: '$(SRC_REGISTRY_DATABRICKS_AZURE_CLIENT_SECRET)'
+                armSubscriptionId: '$(SRC_REGISTRY_ARM_SUBSCRIPTION_ID)'
+          # Retag image
+          - template: container-all-step-template/retag-image-step.yml
+            parameters:
+              sourceImage: '${{ parameters.sourceDockerImgTag }}'
+              targetImage: '${{ parameters.targetDockerImgTag }}'
+          # Scan with Aqua and Register in Target registry
+          - ${{ if or(eq(parameters.vmImage, 'windows-latest'),eq(parameters.vmImage, 'windows-2019'),eq(parameters.vmImage, 'windows-2022'),eq(parameters.vmImage, 'windows-latest'),eq(parameters.vmImage, 'vs2017-win2016')) }}:
+            - template: aqua-scan-step-template/aqua-scan-step-windows.yml
+              parameters:
+                dockerRegistry: $(get_registry_step_target.APP_DOCKER_REGISTRY)
+                dockerImgTag: '${{ parameters.targetDockerImgTag }}'
+          - ${{ else }}: # default to Linux
+            - template: aqua-scan-step-template/aqua-scan-step.yml
+              parameters:
+                dockerRegistry: $(get_registry_step_target.APP_DOCKER_REGISTRY)
+                dockerImgTag: '${{ parameters.targetDockerImgTag }}'
+                isPromoteImg: 'true'
+                vendorServiceConnection: ${{ parameters.vendorServiceConnection }}
+          # Push Container Image to Target Registry
+          - ${{ if eq(variables.destinationContainerRegistry, 'GCR') }}:
+            - template: container-all-step-template/gcp/auth-gcr-push-image-step.yml
+              parameters:
+                hashiVaultEnv: '${{ parameters.targetHashiVaultEnv }}'
+                hashiVaultSecretEnv: '$(targetHashiVaultSecretEnv)'
+                gcpProjectId: ${{ parameters.targetGCPProjectId }}
+                gcpProjectName: ${{ parameters.targetGCPProjectName }}
+                dockerRegistry: $(get_registry_step_target.APP_DOCKER_REGISTRY)
+                dockerImgTag: '${{ parameters.targetDockerImgTag }}'
+                airID: ${{ parameters.targetAirID }}
+                iacDeployerSAFullEmail: ${{ parameters.targetIaCDeployerSAFullEmail }}
+          # Push Container Image to ECR destination registry
+          - ${{ elseif eq(variables.destinationContainerRegistry, 'ECR') }}:
+            - template: container-all-step-template/aws/auth-ecr-push-image-step.yml
+              parameters:
+                dockerImgTag: '${{ parameters.targetDockerImgTag }}'
+                identifier: 'target'
+          # Push Container Image to ACR destination registry
+          - ${{ elseif eq(variables.destinationContainerRegistry, 'ACR') }}:
+            - template: container-all-step-template/azure/auth-acr-push-image-step.yml
+              parameters:
+                dockerImgTag: '${{ parameters.targetDockerImgTag }}'
+                dockerRegistry: $(get_registry_step_target.APP_DOCKER_REGISTRY)
+
+          # Optional - Update variable in variable group      
+          - ${{ if ne(parameters.variableGroupName, '') }}:
+            - template: /templates/operation/azuredevops-all-stage-template/azuredevops-all-step-template/update-variable-in-azdo-varaible-group-step.yml
+              parameters:
+                variableGroupName: '${{ parameters.variableGroupName }}'
+                variableName: '${{ parameters.variableName }}'
+                variableValue: '${{ parameters.variableValue }}'
+                AzureDevOpsOrg: '${{ parameters.AzureDevOpsOrg }}'
+                AzureDevOpsProjectID: '${{ parameters.AzureDevOpsProjectID }}'
+                AzureDevOpsPAT: '${{ parameters.AzureDevOpsPAT }}'

@@ -1,0 +1,160 @@
+trigger: none
+
+parameters:
+# used to query for current iteration (e.g. "Application Architecture -  Engineering Delivery")
+- name: 'azure_devops_team_name'
+  type: string
+  default: ''
+# used for raising PRs against target repository (e.g. "2731REBAR_SPA_Schematics")
+- name: 'azure_devops_repository'
+  type: string
+  default: ''
+# used for raising PRs against target organization (e.g. "https://dev.azure.com/accenturecio08/")
+- name: 'azure_devops_organization'
+  type: string
+  default: ''
+# used for raising PRs against target PROJECT (e.g. "EnterpriseArchitecture_2641")
+- name: 'azure_devops_project'
+  type: string
+  default: ''
+# source for what is being promoted  (e.g. "develop")
+- name: 'source_branch'
+  type: string
+  default: ''
+# used for destination branch.  PRs are raised into this branch (e.g. "main")
+- name: 'target_branch'
+  type: string
+  default: ''
+# used to clean any previous dependency-bot artifacts (PRs and or branches) 
+- name: 'delete_previous_bot_prs_branches'
+  type: string
+  default: 'false'
+# used to populate required fields on User Story 
+# example CIOTypeOfWork=Automation;mytitle=val
+- name: 'required_fields_for_process_template'
+  type: string
+  default: ''
+jobs:
+- job: check_and_raise_job
+  displayName: Run automated release
+  pool:
+    vmImage: 'ubuntu-latest'
+  steps:
+  - task: npmAuthenticate@0
+    inputs:
+      workingFile: .npmrc
+    displayName: 'npmAuthenticate'
+    enabled: true
+  - script: echo ${AZURE_DEVOPS_CLI_PAT} | az devops login
+    env:
+      AZURE_DEVOPS_CLI_PAT: $(System.AccessToken)
+    displayName: 'Login Azure DevOps Extension'
+  - ${{ if eq(parameters.delete_previous_bot_prs_branches, 'true') }}:
+    - script: |
+        az repos pr list --organization $ORG --project "$PROJECT"  --repository $REPO --status "active" --query "[?contains(sourceRefName, 'refs/heads/bot/')] && [?contains(targetRefName, 'refs/heads/${TARGET_BRANCH}')].pullRequestId" | jq .[] | xargs -L1 -I'{}' az repos pr update --id {} --org $ORG --status abandoned
+      displayName: 'Clean Pull Requests from previous releasebot execution for this branch'
+      continueOnError: true
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        TARGET_BRANCH:  ${{ parameters.target_branch }}
+        REPO: ${{ parameters.azure_devops_repository }}
+        ORG: ${{ parameters.azure_devops_organization }}
+        PROJECT: ${{ parameters.azure_devops_project }}
+    - script: |
+        if [ -n "$SYSTEM_ACCESSTOKEN" ]; then 
+          echo ${SYSTEM_ACCESSTOKEN} | az devops login
+          az extension add --name azure-devops
+          git config user.name "${TEAM_NAME}-BOT" 
+          git config user.email "CIO.EA.AppArch.Teams.OperationsAndEngineering@accenture.com"
+          git config http.extraheader "AUTHORIZATION: bearer $SYSTEM_ACCESSTOKEN" 
+        fi
+        git branch -r --list 'origin/bot/rc/*' | xargs -L1 | grep "$TARGET_BRANCH" | sed "s/origin\///" | xargs -I {} git push origin --delete {}
+
+      displayName: 'Clean Branches from previous release-bot execution'
+      continueOnError: true
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        TEAM_NAME: ${{ parameters.azure_devops_team_name }}
+        TARGET_BRANCH:  ${{ parameters.target_branch }}
+  - bash: |
+        # query for current iteration name
+        CURRENT_ITERATION=$(az boards iteration team list --team "$TEAM_NAME" | jq -rc ' .[] | select (.attributes .timeFrame | contains("current")) | .name' | sed -e 's/ /-/g')
+        CURRENT_ITERATION_PATH=$(az boards iteration team list --team "$TEAM_NAME" | jq -rc ' .[] | select (.attributes .timeFrame | contains("current")) | .path')
+        echo $CURRENT_ITERATION_PATH
+        AREA=$(az boards area team list --team "$TEAM_NAME" --org $ORG --project $PROJECT | jq -rc ' .defaultValue')
+        echo $AREA
+        NOW=$(date +"%d-%b-%Y")
+        mkdir -p $NOW
+
+        MERGE_BRANCH="$CURRENT_ITERATION/$TARGET_BRANCH/$NOW"
+
+        if [ -n "$SYSTEM_ACCESSTOKEN" ]; then 
+            echo ${SYSTEM_ACCESSTOKEN} | az devops login
+            az extension add --name azure-devops
+            git config user.name "${TEAM_NAME}-RELEASEBOT" 
+            git config user.email "CIO.EA.AppArch.Teams.OperationsAndEngineering@accenture.com"
+            git config http.extraheader "AUTHORIZATION: bearer $SYSTEM_ACCESSTOKEN" 
+        fi
+
+        git fetch -p
+
+        git checkout $TARGET_BRANCH
+
+        git checkout $SOURCE_BRANCH
+        # create a temp branch to merge target into
+        git checkout -b $MERGE_BRANCH 
+
+        # create a new commit that uses our changes
+        git merge -s ours $TARGET_BRANCH -m "merging $SOURCE_BRANCH via $MERGE_BRANCH into $TARGET_BRANCH with ours"
+
+
+        git checkout $TARGET_BRANCH
+
+        # create the 'real' merge branch
+        git checkout -b bot/rc/$MERGE_BRANCH 
+
+        # this will be a fast-forward commit
+        git merge -X theirs $MERGE_BRANCH -m "merging $SOURCE_BRANCH via $MERGE_BRANCH into $TARGET_BRANCH"
+
+        git checkout $SOURCE_BRANCH
+        git merge $MERGE_BRANCH 
+
+        git push origin $SOURCE_BRANCH
+
+        git branch -D $MERGE_BRANCH 
+        git push origin bot/rc/$MERGE_BRANCH
+        command="az boards work-item create --type \"User Story\" --title \"release-bot: ${REPO}-$TARGET_BRANCH\" --fields"
+
+        # make REQUIRED_FIELDS dynamic, semicolon separated 
+        #     REQUIRED_FIELDS="scrum_stage found=Build;mytitle=val"
+
+        IFS=';'; arrIN=($REQUIRED_FIELDS); unset IFS;
+        for req_field in "${arrIN[@]}"; do  
+          command+=' "'
+          command+=$req_field
+          command+='" '
+        done
+        command+=" --org ${ORG} --project ${PROJECT} --area \"${AREA}\" --iteration \"${CURRENT_ITERATION_PATH}\" --discussion \"generated by ${TEAM_NAME}-RELEASEBOT\""
+        WORK_ITEM=$(eval $command | jq '.id')
+
+        az repos pr create --source-branch bot/rc/$MERGE_BRANCH --target-branch $TARGET_BRANCH --org $ORG \
+            --project $PROJECT --repository $REPO --transition-work-items --delete-source-branch --auto-complete \
+            --title $MERGE_BRANCH --description "generated by ${TEAM_NAME}-RELEASEBOT" --work-items $WORK_ITEM \
+             --output json \
+              > pr.json
+        cat pr.json
+        PR_ID=$(jq '.pullRequestId' pr.json)
+        rm pr.json
+        az repos pr set-vote --id $PR_ID --org $ORG --vote 'approve'
+
+    displayName: 'Run Release Bot'
+    continueOnError: true
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      SOURCE_BRANCH: ${{ parameters.source_branch }}
+      TARGET_BRANCH:  ${{ parameters.target_branch }}
+      TEAM_NAME: ${{ parameters.azure_devops_team_name }}
+      REPO: ${{ parameters.azure_devops_repository }}
+      ORG: ${{ parameters.azure_devops_organization }}
+      PROJECT: ${{ parameters.azure_devops_project }}
+      REQUIRED_FIELDS: ${{ parameters.required_fields_for_process_template }}

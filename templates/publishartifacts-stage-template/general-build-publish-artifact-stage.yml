@@ -1,0 +1,25 @@
+parameters:
+- name: vmImage
+  default: ''
+- name: archiveFolder
+  default: ''
+- name: artifactName
+  default: ''
+
+stages: 
+- stage: Publish_Artifact
+  jobs:
+  - job: Publish_Artifact
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    steps:
+    - task: ArchiveFiles@2
+      displayName: 'Archive INFRA_LAYER_FOLDER'
+      inputs:
+        rootFolderOrFile: ${{ parameters.archiveFolder }}
+        archiveFile: '$(Pipeline.Workspace)/${{ parameters.artifactName }}-$(build.buildnumber).zip'
+      enabled: true
+  
+    - publish: $(Pipeline.Workspace)/${{ parameters.artifactName }}-$(build.buildnumber).zip
+      artifact: build-bundle-${{ parameters.artifactName }}
+      enabled: true

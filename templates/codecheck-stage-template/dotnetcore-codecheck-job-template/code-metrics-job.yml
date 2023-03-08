@@ -1,0 +1,31 @@
+parameters:
+- name: DOTNETSDKVERSION  # defaults for any parameters that aren't specified
+  default: ''
+- name: nuGetServiceConnectionName
+  default: ''  
+- name: projects
+  default: '**/*.WebApi.csproj'
+
+steps:
+  - task: UseDotNet@2
+    displayName: Install DotNet SDK
+    inputs:
+      packageType: 'sdk'
+      version: ${{ parameters.DOTNETSDKVERSION }}
+  
+  - template: /templates/nuget-common/nuget-authenticate-step.yml@AzurePipelinesTemplateAIR2731
+    parameters:
+      nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+      
+  - task: DotNetCoreCLI@2
+    displayName: Code Metrics
+    inputs:
+      command: 'build'
+      projects: ${{ parameters.projects }}
+      arguments: '/t:Metrics /p:MetricsOutputFile="$(Build.ArtifactStagingDirectory)\code-metrics-report.xml"'
+  
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Metrics'
+    inputs:
+      ArtifactName: 'Codemetrics-Report'
+      PathtoPublish: $(Build.ArtifactStagingDirectory)

@@ -1,0 +1,106 @@
+parameters:
+- name: vmImage
+  default: 'windows-2019'
+- name: deployInfraTFLayerFolder
+  default: ''
+- name: artifactName
+  default: ''
+- name: projectName
+  default: ''
+- name: projectFolder
+  default: ''
+- name: projectIsWeb
+  default: True
+- name: packageName
+  default: ''
+- name: nuGetServiceConnectionName
+  default: ''  
+- name: netCoreSDKVer
+  default: '5.x'
+
+stages: 
+- stage: build_publish_artifact
+  displayName: Build DotNetCore, package and Publish Artifact
+  jobs:
+  - job: build_publish_artifact
+    displayName: build_publish_artifact
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+      
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Use .NET Core sdk'
+      inputs:
+        version: ${{ parameters.netCoreSDKVer }}
+      enabled: true
+
+    - task: NuGetToolInstaller@1
+      displayName: 'Use NuGet  4.7.1'
+      inputs:
+        versionSpec: 4.4.1
+        checkLatest: true
+      enabled: true
+
+    - template: /templates/nuget-common/nuget-authenticate-step.yml@AzurePipelinesTemplateAIR2731
+      parameters:
+        nuGetServiceConnectionName: ${{ parameters.nuGetServiceConnectionName }}
+
+    - task: DotNetCoreCLI@2
+      displayName: 'dotnet restore'
+      inputs:
+        command: restore
+        projects: ${{ parameters.projectName }}
+      enabled: true    
+
+    - task: DotNetCoreCLI@2
+      displayName: 'dotnet build'
+      inputs:
+        projects: ${{ parameters.projectName }}
+        arguments: '--configuration release'
+      enabled: true    
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Prepare publish package'
+      inputs:
+        command: publish
+        projects: ${{ parameters.projectName }}
+        publishWebProjects: ${{ parameters.projectIsWeb }}
+        arguments: '--configuration release --output $(Build.ArtifactStagingDirectory)\ci-build'
+        zipAfterPublish: False
+
+    - task: ArchiveFiles@2
+      displayName: 'Zip the publish package'
+      inputs:
+        rootFolderOrFile: '$(Build.ArtifactStagingDirectory)\ci-build\${{ parameters.projectFolder }}'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)\${{ parameters.packageName }}'
+        replaceExistingArchive: true
+   
+    - task: CopyFiles@2
+      displayName: 'Copy publish package to infra layer folder'
+      inputs:
+        SourceFolder: $(Build.ArtifactStagingDirectory)
+        Contents: ${{ parameters.packageName }}
+        TargetFolder: $(Build.SourcesDirectory)\${{ parameters.deployInfraTFLayerFolder}}
+      enabled: true
+
+    - task: qetza.replacetokens.replacetokens-task.replacetokens@3
+      displayName: 'Replace tokens in **/*.tfvars'
+      inputs:
+        rootDirectory: $(Build.SourcesDirectory)\${{ parameters.deployInfraTFLayerFolder}}
+        targetFiles: |
+          **/*.tfvars
+          tokenPrefix: '#{'
+          tokenSuffix: '}#'
+
+    - task: ArchiveFiles@2
+      displayName: 'Build Pipeline Artifact'
+      inputs:
+        rootFolderOrFile: $(Build.SourcesDirectory)\infra
+        archiveFile: $(Build.ArtifactStagingDirectory)\${{ parameters.artifactName }}-$(Build.BuildNumber).zip
+      enabled: true
+
+    - publish: $(Build.ArtifactStagingDirectory)\${{ parameters.artifactName }}-$(Build.BuildNumber).zip
+      artifact: ${{ parameters.artifactName }}
+      enabled: true

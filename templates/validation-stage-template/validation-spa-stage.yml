@@ -1,0 +1,67 @@
+##############################################################
+################ Functional Validation Template ##############
+##############################################################
+parameters:
+- name: VMIMAGE  # defaults for any parameters that aren't specified
+  default: 'ubuntu-latest'
+- name: enabled_cacheNodeModules
+  default: true
+- name: enabled_cacheCypress
+  default: true
+
+stages: 
+- stage: functional_validation
+  displayName: Functional Quality Checks
+  dependsOn: []
+  jobs: 
+  - job: functional_checks
+    displayName: Lighthouse checks
+    steps: 
+      - template: /templates/common-step-template/npm-ci-cache-package-steps.yml@AzurePipelinesTemplateAIR2731  
+        parameters:
+          enabled_cacheNodeModules: ${{ parameters.enabled_cacheNodeModules }}
+          enabled_cacheCypress: ${{ parameters.enabled_cacheCypress }}
+      - bash: |
+          #!/bin/bash
+          mkdir -p reports
+          mkdir -p .lighthouseci
+        displayName: 'create reports folder'
+      - task: Npm@1
+        displayName: npm build cicd
+        enabled: true
+        inputs:
+          command: custom
+          verbose: false
+          customCommand: 'run build:local'
+      - task: Npm@1
+        displayName: 'Lighthouse Accessibility, SEO and Page Speed'
+        inputs:
+          command: custom
+          verbose: false
+          customCommand: 'run lighthouse:ci'
+        enabled: true
+      - task: Npm@1
+        displayName: 'webpack bundle analyzer'
+        inputs:
+          command: custom
+          verbose: false
+          customCommand: 'run bundle-report'
+        enabled: true
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish reports'
+        enabled: true
+        inputs:
+          PathtoPublish: 'reports'
+          ArtifactName: 'reports'
+        continueOnError: true
+        condition: succeededOrFailed()
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish reports'
+        enabled: true
+        inputs:
+          PathtoPublish: '.lighthouseci'
+          ArtifactName: 'Lighthouse'
+        continueOnError: true
+        condition: succeededOrFailed()
+    pool:
+      vmImage: ${{ parameters.VMIMAGE }}
